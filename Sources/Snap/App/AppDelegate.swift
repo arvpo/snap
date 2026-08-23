@@ -45,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.showCaptureFailedAlert(error)
         }
 
+        if let icon = bundledAppIcon() {
+            NSApp.applicationIconImage = icon
+        }
+
         installStatusItem()
         hotKey = GlobalHotKey { [weak self] in
             self?.coordinator.handleCaptureRequest()
@@ -55,6 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey?.unregister()
         hotKey = nil
         coordinator.cancel()
+    }
+
+    private func bundledAppIcon() -> NSImage? {
+        Bundle.main.url(forResource: "snap-icon", withExtension: "png")
+            .flatMap { NSImage(contentsOf: $0) }
     }
 
     private func installStatusItem() {
