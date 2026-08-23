@@ -24,6 +24,11 @@ final class AnnotationWindowController {
         self.document = AnnotationDocument(baseImage: baseImage)
         self.pipeline = AnnotationRenderPipeline(clipboardService: clipboardService)
         self.onFinished = onFinished
+        SessionLifetime.retain(.editorController)
+    }
+
+    deinit {
+        SessionLifetime.release(.editorController)
     }
 
     func show() {

@@ -16,6 +16,7 @@ final class CaptureCoordinator {
     private let captureService: ScreenCaptureServicing
     private let clipboardService: ClipboardServicing
     private var captureTask: Task<Void, Never>?
+    private var sessionToken: CaptureSessionToken?
 
     /// Fired after leaving idle for a new session.
     var onSessionStarted: (() -> Void)?
@@ -26,7 +27,7 @@ final class CaptureCoordinator {
     /// Fired only after ScreenCaptureKit has produced the pointer display snapshot.
     var onCapturedDisplay: ((CapturedDisplay) -> Void)?
 
-    /// Phase 4 replaces the temporary handler with the annotation editor.
+    /// Fired after the crop is on the clipboard and the editor should open.
     var onSelectionCompleted: ((CGImage) -> Void)?
 
     var onPermissionDenied: (() -> Void)?
@@ -101,6 +102,8 @@ final class CaptureCoordinator {
 
     func snapshotCaptured() {
         guard state == .capturing else { return }
+        CaptureSignposts.shared.end(.hotkeyToSnapshot)
+        CaptureSignposts.shared.begin(.snapshotToOverlay)
         state = .selecting
     }
 
@@ -110,6 +113,7 @@ final class CaptureCoordinator {
 
         do {
             try clipboardService.writePNG(image)
+            CaptureSignposts.shared.end(.mouseUpToFirstClipboard)
         } catch {
             onCaptureFailed?(error)
             leaveSession()
@@ -132,6 +136,8 @@ final class CaptureCoordinator {
     }
 
     private func enterSession(startingAt newState: State) {
+        sessionToken = CaptureSessionToken()
+        CaptureSignposts.shared.begin(.hotkeyToSnapshot)
         state = newState
         onSessionStarted?()
     }
@@ -146,7 +152,21 @@ final class CaptureCoordinator {
         captureTask = nil
         capturedDisplay = nil
         selectedImage = nil
+        CaptureSignposts.shared.abandonAll()
+        sessionToken = nil
         state = .idle
         onSessionEnded?()
+    }
+}
+
+/// Lives exactly as long as one coordinator session so a leaked busy
+/// coordinator still drops the capture-session counter on deinit.
+private final class CaptureSessionToken {
+    init() {
+        SessionLifetime.retain(.captureSession)
+    }
+
+    deinit {
+        SessionLifetime.release(.captureSession)
     }
 }

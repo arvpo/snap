@@ -36,7 +36,10 @@ final class AnnotationRenderPipeline {
         let box = SendableBox(image: baseImage)
 
         currentTask?.cancel()
+        CaptureSignposts.shared.begin(.annotationMouseUpToClipboard)
+        SessionLifetime.retain(.renderTask)
         let task = Task { [weak self] in
+            defer { SessionLifetime.release(.renderTask) }
             let outcome = await Task.detached {
                 do {
                     return Result<CGImage, Error>.success(try await render(box.image, annotations))
@@ -50,10 +53,13 @@ final class AnnotationRenderPipeline {
             case .success(let image):
                 do {
                     try self.clipboardService.writePNG(image)
+                    CaptureSignposts.shared.end(.annotationMouseUpToClipboard)
                 } catch {
+                    CaptureSignposts.shared.abandon(.annotationMouseUpToClipboard)
                     self.onRenderFailed?(error)
                 }
             case .failure(let error):
+                CaptureSignposts.shared.abandon(.annotationMouseUpToClipboard)
                 self.onRenderFailed?(error)
             }
         }
@@ -67,6 +73,7 @@ final class AnnotationRenderPipeline {
         generation += 1
         currentTask?.cancel()
         currentTask = nil
+        CaptureSignposts.shared.abandon(.annotationMouseUpToClipboard)
     }
 
     /// Waits for whatever render is currently in flight, if any, so callers

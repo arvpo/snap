@@ -1,5 +1,4 @@
 import AppKit
-import os
 
 public enum SnapApp {
     public static func run() {
@@ -17,53 +16,39 @@ public enum SnapApp {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let coordinator = CaptureCoordinator()
     private let clipboardService = ClipboardService()
+    private lazy var coordinator = CaptureCoordinator(clipboardService: clipboardService)
+    private var presenter: CaptureSessionPresenter?
     private var statusItem: NSStatusItem?
     private var hotKey: GlobalHotKey?
-    private var selectionOverlay: SelectionOverlayController?
-    private var annotationEditor: AnnotationWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        coordinator.onCapturedDisplay = { [weak self] capturedDisplay in
-            self?.presentSelectionOverlay(capturedDisplay)
-        }
-        coordinator.onSelectionCompleted = { [weak self] image in
-            Logger.app.info("Copied \(image.width, privacy: .public) × \(image.height, privacy: .public) selection")
-            self?.presentAnnotationEditor(for: image)
-        }
-        coordinator.onSessionEnded = { [weak self] in
-            self?.dismissSelectionOverlay()
-            self?.dismissAnnotationEditor()
-        }
-        coordinator.onPermissionDenied = { [weak self] in
+        let presenter = CaptureSessionPresenter(
+            coordinator: coordinator,
+            factories: .live(clipboardService: clipboardService)
+        )
+        presenter.onPermissionDenied = { [weak self] in
             self?.showScreenRecordingAccessAlert()
         }
-        coordinator.onCaptureFailed = { [weak self] error in
+        presenter.onCaptureFailed = { [weak self] error in
             self?.showCaptureFailedAlert(error)
         }
-
-        if let icon = bundledAppIcon() {
-            NSApp.applicationIconImage = icon
-        }
+        presenter.bind()
+        self.presenter = presenter
 
         installStatusItem()
         hotKey = GlobalHotKey { [weak self] in
-            self?.coordinator.handleCaptureRequest()
+            self?.presenter?.handleCaptureRequest()
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         hotKey?.unregister()
         hotKey = nil
+        presenter?.dismissAll()
         coordinator.cancel()
-    }
-
-    private func bundledAppIcon() -> NSImage? {
-        Bundle.main.url(forResource: "snap-icon", withExtension: "png")
-            .flatMap { NSImage(contentsOf: $0) }
     }
 
     private func installStatusItem() {
@@ -101,51 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func captureFromMenu(_ sender: Any?) {
-        coordinator.handleCaptureRequest()
-    }
-
-    private func presentSelectionOverlay(_ capturedDisplay: CapturedDisplay) {
-        guard selectionOverlay == nil else { return }
-        let controller = SelectionOverlayController(
-            onSelection: { [weak self] image in
-                self?.coordinator.selectionCompleted(with: image)
-            },
-            onCancel: { [weak self] in
-                self?.coordinator.cancel()
-            },
-            onFailure: { [weak self] error in
-                self?.showCaptureFailedAlert(error)
-                self?.coordinator.cancel()
-            }
-        )
-        controller.show(capturedDisplay)
-        selectionOverlay = controller
-        Logger.app.info("Captured display \(capturedDisplay.displayID, privacy: .public)")
-    }
-
-    private func dismissSelectionOverlay() {
-        selectionOverlay?.close()
-        selectionOverlay = nil
-        Logger.app.info("Capture session returned to idle")
-    }
-
-    private func presentAnnotationEditor(for image: CGImage) {
-        guard annotationEditor == nil else { return }
-        let controller = AnnotationWindowController(
-            baseImage: image,
-            clipboardService: clipboardService,
-            onFinished: { [weak self] in
-                self?.annotationEditor = nil
-                self?.coordinator.finish()
-            }
-        )
-        annotationEditor = controller
-        controller.show()
-    }
-
-    private func dismissAnnotationEditor() {
-        annotationEditor?.close()
-        annotationEditor = nil
+        presenter?.handleCaptureRequest()
     }
 
     private func showScreenRecordingAccessAlert() {
@@ -169,8 +110,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
-}
-
-private extension Logger {
-    static let app = Logger(subsystem: "com.stradeon.Snap", category: "app")
 }

@@ -29,6 +29,11 @@ final class AnnotationCanvasView: NSView {
         self.baseImage = baseImage
         self.imagePixelSize = CGSize(width: baseImage.width, height: baseImage.height)
         super.init(frame: .zero)
+        SessionLifetime.retain(.canvasView)
+    }
+
+    deinit {
+        SessionLifetime.release(.canvasView)
     }
 
     @available(*, unavailable)

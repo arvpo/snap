@@ -21,9 +21,11 @@ private final class CaptureServiceStub: ScreenCaptureServicing {
         return requestResult
     }
 
+    var captureResult: Result<CapturedDisplay, Error> = .failure(StubError.captureFailed)
+
     func captureDisplayAtPointer() async throws -> CapturedDisplay {
         captureCount += 1
-        throw StubError.captureFailed
+        return try captureResult.get()
     }
 }
 
@@ -31,8 +33,10 @@ private final class CaptureServiceStub: ScreenCaptureServicing {
 private final class ClipboardServiceStub: ClipboardServicing {
     private(set) var writeCount = 0
     private(set) var lastImage: CGImage?
+    var writeError: Error?
 
     func writePNG(_ image: CGImage) throws {
+        if let writeError { throw writeError }
         writeCount += 1
         lastImage = image
     }
@@ -204,5 +208,44 @@ func registerCaptureCoordinatorTests() {
 
         try expectEqual(service.captureCount, 1)
         try expectEqual(coordinator.state, .idle)
+    }
+
+    test("successful capture advances to selecting and reports the display") {
+        let service = CaptureServiceStub()
+        let display = makeTestCapturedDisplay()
+        service.captureResult = .success(display)
+        let coordinator = CaptureCoordinator(captureService: service)
+        var reported: CapturedDisplay?
+        coordinator.onCapturedDisplay = { reported = $0 }
+
+        coordinator.handleCaptureRequest()
+        try await waitUntil { coordinator.state == .selecting }
+
+        try expectEqual(coordinator.state, .selecting)
+        try expect(reported != nil)
+        try expect(coordinator.capturedDisplay != nil)
+        try expectEqual(service.captureCount, 1)
+        coordinator.cancel()
+        try expect(coordinator.capturedDisplay == nil)
+    }
+
+    test("clipboard write failure during selection returns to idle") {
+        let clipboard = ClipboardServiceStub()
+        clipboard.writeError = ClipboardError.pasteboardWriteFailed
+        let coordinator = CaptureCoordinator(
+            captureService: CaptureServiceStub(),
+            clipboardService: clipboard
+        )
+        var failed = 0
+        coordinator.onCaptureFailed = { _ in failed += 1 }
+        coordinator.handleCaptureRequest()
+        coordinator.snapshotCaptured()
+        coordinator.selectionCompleted(with: coordinatorTestImage())
+
+        try expectEqual(coordinator.state, .idle)
+        try expectEqual(clipboard.writeCount, 0)
+        try expectEqual(failed, 1)
+        try expect(coordinator.selectedImage == nil)
+        try expect(coordinator.capturedDisplay == nil)
     }
 }

@@ -21,6 +21,11 @@ final class SelectionOverlayController {
         self.onSelection = onSelection
         self.onCancel = onCancel
         self.onFailure = onFailure
+        SessionLifetime.retain(.overlayController)
+    }
+
+    deinit {
+        SessionLifetime.release(.overlayController)
     }
 
     func show(_ capturedDisplay: CapturedDisplay) {
@@ -90,6 +95,8 @@ final class SelectionOverlayController {
         isFinishing = true
         window?.orderOut(nil)
 
+        CaptureSignposts.shared.begin(.mouseUpToFirstClipboard)
+
         do {
             let croppedImage = try SelectionCropper.deepCopy(
                 capturedDisplay.image,
@@ -99,6 +106,7 @@ final class SelectionOverlayController {
             tearDown()
             callback?(croppedImage)
         } catch {
+            CaptureSignposts.shared.abandon(.mouseUpToFirstClipboard)
             let callback = onFailure
             tearDown()
             callback?(error)
@@ -110,6 +118,12 @@ final class SelectionOverlayController {
         window?.orderOut(nil)
         window?.contentView = nil
         window?.close()
+
+        #if DEBUG
+        weak let weakWindow = window
+        weak let weakView = overlayView
+        #endif
+
         overlayView = nil
         window = nil
         capturedDisplay = nil
@@ -122,6 +136,13 @@ final class SelectionOverlayController {
         onSelection = nil
         onCancel = nil
         onFailure = nil
+
+        #if DEBUG
+        DispatchQueue.main.async {
+            assert(weakWindow == nil, "SelectionOverlayController leaked its window")
+            assert(weakView == nil, "SelectionOverlayController leaked its overlay view")
+        }
+        #endif
     }
 }
 

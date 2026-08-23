@@ -51,6 +51,11 @@ final class SelectionOverlayView: NSView {
         dimensionsLayer.contentsScale = backingScale
         dimensionsLayer.isHidden = true
         layer.addSublayer(dimensionsLayer)
+        SessionLifetime.retain(.overlayView)
+    }
+
+    deinit {
+        SessionLifetime.release(.overlayView)
     }
 
     @available(*, unavailable)

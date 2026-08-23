@@ -11,6 +11,11 @@ final class AnnotationDocument {
 
     init(baseImage: CGImage) {
         self.baseImage = baseImage
+        SessionLifetime.retain(.document)
+    }
+
+    deinit {
+        SessionLifetime.release(.document)
     }
 
     var isEmpty: Bool { annotations.isEmpty }

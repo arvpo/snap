@@ -67,6 +67,8 @@ cp "${ROOT}/Resources/snap-icon.png" "${APP}/Contents/Resources/snap-icon.png"
 pack_app_icon "${ROOT}/Resources/snap-icon.png" "${APP}/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc sign so TCC can attach to the stable bundle identifier.
+# Developer ID signing, notarization, and DMG/App Store packaging are a
+# later phase and must not be added here.
 codesign --force --sign - --timestamp=none "${APP}"
 
 echo "Built ${APP}"
