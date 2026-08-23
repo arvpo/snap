@@ -12,7 +12,6 @@ final class AnnotationCanvasView: NSView {
     var onUndo: (() -> Void)?
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
-    var onCopy: (() -> Void)?
     var onToolSelected: ((AnnotationTool) -> Void)?
 
     // Not layer-backed: `draw(_:)` paints the base image and every
@@ -52,7 +51,6 @@ final class AnnotationCanvasView: NSView {
         onUndo = nil
         onFinish = nil
         onCancel = nil
-        onCopy = nil
         onToolSelected = nil
         dragStart = nil
         previewAnnotation = nil
@@ -111,7 +109,9 @@ final class AnnotationCanvasView: NSView {
                 onUndo?()
                 return
             case "c":
-                onCopy?()
+                // Same action as Enter/the done button: keep the latest
+                // clipboard image and close the editor.
+                onFinish?()
                 return
             default:
                 break
@@ -149,7 +149,14 @@ final class AnnotationCanvasView: NSView {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
 
         if let baseImage {
+            // `CGContext.draw(_:in:)` has its own fixed sense of "up" that
+            // ignores the current transform's handedness, so in this
+            // flipped view it draws upside down unless we counter-flip
+            // just for this call. Path-based annotation drawing below has
+            // no such quirk and needs no adjustment.
             context.saveGState()
+            context.translateBy(x: 0, y: bounds.height)
+            context.scaleBy(x: 1, y: -1)
             context.draw(baseImage, in: CGRect(origin: .zero, size: bounds.size))
             context.restoreGState()
         }

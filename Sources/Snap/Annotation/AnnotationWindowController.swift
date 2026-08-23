@@ -2,8 +2,9 @@ import AppKit
 import CoreGraphics
 
 /// Owns the borderless annotation window, its canvas, and its toolbar for
-/// one session. `Enter` and `Esc` both close the editor and keep whatever is
-/// already on the clipboard; neither rolls the clipboard back.
+/// one session. `Enter`, `Cmd+C`, and the done button all close the editor
+/// and keep whatever is already on the clipboard; `Esc` closes the same way
+/// without rolling the clipboard back.
 @MainActor
 final class AnnotationWindowController {
     private let document: AnnotationDocument
@@ -38,7 +39,6 @@ final class AnnotationWindowController {
         canvasView.onUndo = { [weak self] in self?.undo() }
         canvasView.onFinish = { [weak self] in self?.finish() }
         canvasView.onCancel = { [weak self] in self?.finish() }
-        canvasView.onCopy = { [weak self] in self?.copyNow() }
         canvasView.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
 
         let toolbarSize = CGSize(width: 220, height: 44)
@@ -113,14 +113,11 @@ final class AnnotationWindowController {
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
-    private func copyNow() {
-        pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
-    }
-
-    /// `Enter`/`Esc`/done all land here. Hides the window immediately for a
-    /// responsive close, but waits for whatever render the last edit kicked
-    /// off before tearing down — otherwise a fast Enter right after a commit
-    /// could cancel that render and leave the clipboard one edit behind.
+    /// `Enter`, `Cmd+C`, `Esc`, and the done button all land here. Hides the
+    /// window immediately for a responsive close, but waits for whatever
+    /// render the last edit kicked off before tearing down — otherwise a
+    /// fast Enter right after a commit could cancel that render and leave
+    /// the clipboard one edit behind.
     private func finish() {
         guard !isFinishing, window != nil else { return }
         isFinishing = true
