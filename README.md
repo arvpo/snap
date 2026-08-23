@@ -6,7 +6,7 @@ It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captur
 
 ## Status
 
-Not implemented yet. The build plan is in [`PLAN.md`](PLAN.md). Implement one phase per context window and stop at that phase’s completion gate.
+Phases 1 and 2 are implemented. Snap builds as a menu-bar app, captures the display under the pointer with ScreenCaptureKit, and has tested mixed-display coordinate conversion. Region selection starts in Phase 3.
 
 ## What it will do
 

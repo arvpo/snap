@@ -37,7 +37,7 @@ func expectEqual<Value: Equatable>(
 
 struct RegisteredTest {
     let name: String
-    let body: () throws -> Void
+    let body: () async throws -> Void
 }
 
 @MainActor
@@ -46,19 +46,20 @@ enum TestCatalog {
 }
 
 @MainActor
-func test(_ name: String, body: @escaping () throws -> Void) {
+func test(_ name: String, body: @escaping () async throws -> Void) {
     TestCatalog.tests.append(RegisteredTest(name: name, body: body))
 }
 
 @MainActor
-private func runAllTests() -> Int32 {
+private func runAllTests() async -> Int32 {
     registerCaptureCoordinatorTests()
+    registerScreenGeometryTests()
     registerGlobalHotKeyTests()
 
     var failed = 0
     for item in TestCatalog.tests {
         do {
-            try item.body()
+            try await item.body()
             print("ok   \(item.name)")
         } catch {
             failed += 1

@@ -18,6 +18,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ScreenCaptureKit"),
             ]
         ),
         .executableTarget(
@@ -26,6 +28,7 @@ let package = Package(
             path: "Sources/Snap",
             exclude: [
                 "App",
+                "Capture",
                 "Services",
             ]
         ),

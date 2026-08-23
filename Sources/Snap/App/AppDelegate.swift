@@ -20,16 +20,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = CaptureCoordinator()
     private var statusItem: NSStatusItem?
     private var hotKey: GlobalHotKey?
-    private var placeholder: Phase1PlaceholderController?
+    private var snapshotPreview: Phase2SnapshotController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        coordinator.onSessionStarted = { [weak self] in
-            self?.presentPlaceholder()
+        coordinator.onCapturedDisplay = { [weak self] capturedDisplay in
+            self?.presentSnapshot(capturedDisplay)
         }
         coordinator.onSessionEnded = { [weak self] in
-            self?.dismissPlaceholder()
+            self?.dismissSnapshot()
+        }
+        coordinator.onPermissionDenied = { [weak self] in
+            self?.showScreenRecordingAccessAlert()
+        }
+        coordinator.onCaptureFailed = { [weak self] error in
+            self?.showCaptureFailedAlert(error)
         }
 
         installStatusItem()
@@ -82,31 +88,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.handleCaptureRequest()
     }
 
-    private func presentPlaceholder() {
-        guard placeholder == nil else { return }
-        let controller = Phase1PlaceholderController { [weak self] in
+    private func presentSnapshot(_ capturedDisplay: CapturedDisplay) {
+        guard snapshotPreview == nil else { return }
+        let controller = Phase2SnapshotController { [weak self] in
             self?.coordinator.cancel()
         }
-        controller.show(on: screenContainingPointer())
-        placeholder = controller
-        Logger.app.info("Capture session started (phase 1 stub)")
+        controller.show(capturedDisplay)
+        snapshotPreview = controller
+        Logger.app.info("Captured display \(capturedDisplay.displayID, privacy: .public)")
     }
 
-    private func dismissPlaceholder() {
-        placeholder?.close()
-        placeholder = nil
+    private func dismissSnapshot() {
+        snapshotPreview?.close()
+        snapshotPreview = nil
         Logger.app.info("Capture session returned to idle")
     }
 
-    private func screenContainingPointer() -> NSScreen? {
-        let point = NSEvent.mouseLocation
-        return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main
+    private func showScreenRecordingAccessAlert() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Screen Recording access is required"
+        alert.informativeText = """
+        Open System Settings → Privacy & Security → Screen Recording, enable Snap, then capture again.
+        """
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func showCaptureFailedAlert(_ error: Error) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Snap could not capture the display"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 
-/// Temporary stand-in until Phase 2 shows the frozen display overlay.
+/// Temporary direct-CGImage preview until Phase 3 supplies the selection overlay.
 @MainActor
-private final class Phase1PlaceholderController {
+private final class Phase2SnapshotController {
     private var window: OverlayWindow?
     private let onCancel: () -> Void
 
@@ -114,8 +137,15 @@ private final class Phase1PlaceholderController {
         self.onCancel = onCancel
     }
 
-    func show(on screen: NSScreen?) {
-        let size = NSSize(width: 420, height: 104)
+    func show(_ capturedDisplay: CapturedDisplay) {
+        let maximumSize = NSSize(width: 640, height: 420)
+        let aspect = capturedDisplay.appKitFrame.width / capturedDisplay.appKitFrame.height
+        let size: NSSize
+        if aspect >= maximumSize.width / maximumSize.height {
+            size = NSSize(width: maximumSize.width, height: maximumSize.width / aspect)
+        } else {
+            size = NSSize(width: maximumSize.height * aspect, height: maximumSize.height)
+        }
         let window = OverlayWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless],
@@ -128,9 +158,13 @@ private final class Phase1PlaceholderController {
         window.level = .screenSaver
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         window.isReleasedWhenClosed = false
-        window.contentView = PlaceholderView(onCancel: onCancel)
+        window.contentView = SnapshotPreviewView(
+            frame: NSRect(origin: .zero, size: size),
+            capturedDisplay: capturedDisplay,
+            onCancel: onCancel
+        )
 
-        let frame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: size.width, height: size.height)
+        let frame = capturedDisplay.appKitFrame
         window.setFrameOrigin(
             NSPoint(
                 x: frame.midX - size.width / 2,
@@ -146,6 +180,8 @@ private final class Phase1PlaceholderController {
 
     func close() {
         window?.orderOut(nil)
+        window?.contentView?.layer?.contents = nil
+        window?.contentView?.layer?.delegate = nil
         window?.contentView = nil
         window = nil
     }
@@ -156,40 +192,21 @@ private final class OverlayWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-private final class PlaceholderView: NSView {
+private final class SnapshotPreviewView: NSView {
     private let onCancel: () -> Void
 
-    init(onCancel: @escaping () -> Void) {
+    init(frame: NSRect, capturedDisplay: CapturedDisplay, onCancel: @escaping () -> Void) {
         self.onCancel = onCancel
-        super.init(frame: NSRect(x: 0, y: 0, width: 420, height: 104))
+        super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 0.94).cgColor
+        layer?.backgroundColor = NSColor.black.cgColor
         layer?.cornerRadius = 12
+        layer?.masksToBounds = true
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
-
-        let title = makeLabel(
-            "Capture started",
-            font: .systemFont(ofSize: 16, weight: .semibold),
-            color: .white
-        )
-        let subtitle = makeLabel(
-            "Phase 1 stub — press Esc to dismiss",
-            font: .systemFont(ofSize: 13),
-            color: NSColor.white.withAlphaComponent(0.75)
-        )
-
-        title.translatesAutoresizingMaskIntoConstraints = false
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(title)
-        addSubview(subtitle)
-
-        NSLayoutConstraint.activate([
-            title.centerXAnchor.constraint(equalTo: centerXAnchor),
-            title.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -12),
-            subtitle.centerXAnchor.constraint(equalTo: centerXAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
-        ])
+        layer?.contents = capturedDisplay.image
+        layer?.contentsGravity = .resizeAspect
+        layer?.contentsScale = capturedDisplay.backingScale
     }
 
     @available(*, unavailable)
@@ -209,16 +226,6 @@ private final class PlaceholderView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onCancel()
-    }
-
-    private func makeLabel(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = font
-        label.textColor = color
-        label.alignment = .center
-        label.backgroundColor = .clear
-        label.isBezeled = false
-        return label
     }
 }
 

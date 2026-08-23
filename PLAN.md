@@ -181,8 +181,8 @@ For each new context, provide the agent this plan and ask it to implement exactl
 
 | Phase | Status |
 | --- | --- |
-| 1. CLI-native application foundation | Pending |
-| 2. Capture and coordinate foundation | Pending |
+| 1. CLI-native application foundation | Complete |
+| 2. Capture and coordinate foundation | Implemented; manual display checks pending |
 | 3. Fast selection and immediate clipboard | Pending |
 | 4. Annotation editor and live clipboard | Pending |
 | 5. Integration, performance, and packaging | Pending |
