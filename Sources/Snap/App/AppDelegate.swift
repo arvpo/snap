@@ -20,16 +20,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = CaptureCoordinator()
     private var statusItem: NSStatusItem?
     private var hotKey: GlobalHotKey?
-    private var snapshotPreview: Phase2SnapshotController?
+    private var selectionOverlay: SelectionOverlayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         coordinator.onCapturedDisplay = { [weak self] capturedDisplay in
-            self?.presentSnapshot(capturedDisplay)
+            self?.presentSelectionOverlay(capturedDisplay)
+        }
+        coordinator.onSelectionCompleted = { [weak self] image in
+            Logger.app.info("Copied \(image.width, privacy: .public) × \(image.height, privacy: .public) selection")
+            // Phase 4 will keep this session open and present the annotation editor.
+            self?.coordinator.finish()
         }
         coordinator.onSessionEnded = { [weak self] in
-            self?.dismissSnapshot()
+            self?.dismissSelectionOverlay()
         }
         coordinator.onPermissionDenied = { [weak self] in
             self?.showScreenRecordingAccessAlert()
@@ -88,19 +93,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.handleCaptureRequest()
     }
 
-    private func presentSnapshot(_ capturedDisplay: CapturedDisplay) {
-        guard snapshotPreview == nil else { return }
-        let controller = Phase2SnapshotController { [weak self] in
-            self?.coordinator.cancel()
-        }
+    private func presentSelectionOverlay(_ capturedDisplay: CapturedDisplay) {
+        guard selectionOverlay == nil else { return }
+        let controller = SelectionOverlayController(
+            onSelection: { [weak self] image in
+                self?.coordinator.selectionCompleted(with: image)
+            },
+            onCancel: { [weak self] in
+                self?.coordinator.cancel()
+            },
+            onFailure: { [weak self] error in
+                self?.showCaptureFailedAlert(error)
+                self?.coordinator.cancel()
+            }
+        )
         controller.show(capturedDisplay)
-        snapshotPreview = controller
+        selectionOverlay = controller
         Logger.app.info("Captured display \(capturedDisplay.displayID, privacy: .public)")
     }
 
-    private func dismissSnapshot() {
-        snapshotPreview?.close()
-        snapshotPreview = nil
+    private func dismissSelectionOverlay() {
+        selectionOverlay?.close()
+        selectionOverlay = nil
         Logger.app.info("Capture session returned to idle")
     }
 
@@ -124,108 +138,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = error.localizedDescription
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-}
-
-/// Temporary direct-CGImage preview until Phase 3 supplies the selection overlay.
-@MainActor
-private final class Phase2SnapshotController {
-    private var window: OverlayWindow?
-    private let onCancel: () -> Void
-
-    init(onCancel: @escaping () -> Void) {
-        self.onCancel = onCancel
-    }
-
-    func show(_ capturedDisplay: CapturedDisplay) {
-        let maximumSize = NSSize(width: 640, height: 420)
-        let aspect = capturedDisplay.appKitFrame.width / capturedDisplay.appKitFrame.height
-        let size: NSSize
-        if aspect >= maximumSize.width / maximumSize.height {
-            size = NSSize(width: maximumSize.width, height: maximumSize.width / aspect)
-        } else {
-            size = NSSize(width: maximumSize.height * aspect, height: maximumSize.height)
-        }
-        let window = OverlayWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
-        window.level = .screenSaver
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        window.isReleasedWhenClosed = false
-        window.contentView = SnapshotPreviewView(
-            frame: NSRect(origin: .zero, size: size),
-            capturedDisplay: capturedDisplay,
-            onCancel: onCancel
-        )
-
-        let frame = capturedDisplay.appKitFrame
-        window.setFrameOrigin(
-            NSPoint(
-                x: frame.midX - size.width / 2,
-                y: frame.midY - size.height / 2
-            )
-        )
-
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(window.contentView)
-        self.window = window
-    }
-
-    func close() {
-        window?.orderOut(nil)
-        window?.contentView?.layer?.contents = nil
-        window?.contentView?.layer?.delegate = nil
-        window?.contentView = nil
-        window = nil
-    }
-}
-
-private final class OverlayWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-
-private final class SnapshotPreviewView: NSView {
-    private let onCancel: () -> Void
-
-    init(frame: NSRect, capturedDisplay: CapturedDisplay, onCancel: @escaping () -> Void) {
-        self.onCancel = onCancel
-        super.init(frame: frame)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
-        layer?.cornerRadius = 12
-        layer?.masksToBounds = true
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
-        layer?.contents = capturedDisplay.image
-        layer?.contentsGravity = .resizeAspect
-        layer?.contentsScale = capturedDisplay.backingScale
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
-            onCancel()
-            return
-        }
-        super.keyDown(with: event)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        onCancel()
     }
 }
 

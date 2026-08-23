@@ -6,7 +6,7 @@ It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captur
 
 ## Status
 
-Phases 1 and 2 are implemented. Snap builds as a menu-bar app, captures the display under the pointer with ScreenCaptureKit, and has tested mixed-display coordinate conversion. Region selection starts in Phase 3.
+Phases 1 through 3 are implemented. Snap captures the display under the pointer, presents a full-screen region selector, and immediately copies a deep-copied crop to the clipboard. Mixed-display conversion and crop pixels are covered by automated tests. Annotation starts in Phase 4.
 
 ## What it will do
 

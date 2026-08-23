@@ -1,3 +1,5 @@
+import CoreGraphics
+
 @MainActor
 final class CaptureCoordinator {
     enum State: Equatable, Sendable {
@@ -10,7 +12,9 @@ final class CaptureCoordinator {
 
     private(set) var state: State = .idle
     private(set) var capturedDisplay: CapturedDisplay?
+    private(set) var selectedImage: CGImage?
     private let captureService: ScreenCaptureServicing
+    private let clipboardService: ClipboardServicing
     private var captureTask: Task<Void, Never>?
 
     /// Fired after leaving idle for a new session.
@@ -22,11 +26,18 @@ final class CaptureCoordinator {
     /// Fired only after ScreenCaptureKit has produced the pointer display snapshot.
     var onCapturedDisplay: ((CapturedDisplay) -> Void)?
 
+    /// Phase 4 replaces the temporary handler with the annotation editor.
+    var onSelectionCompleted: ((CGImage) -> Void)?
+
     var onPermissionDenied: (() -> Void)?
     var onCaptureFailed: ((Error) -> Void)?
 
-    init(captureService: ScreenCaptureServicing = ScreenCaptureService()) {
+    init(
+        captureService: ScreenCaptureServicing = ScreenCaptureService(),
+        clipboardService: ClipboardServicing = ClipboardService()
+    ) {
         self.captureService = captureService
+        self.clipboardService = clipboardService
     }
 
     /// Menu and hotkey both enter here. Requests outside idle are ignored.
@@ -93,9 +104,21 @@ final class CaptureCoordinator {
         state = .selecting
     }
 
-    func selectionCompleted() {
+    func selectionCompleted(with image: CGImage) {
         guard state == .selecting else { return }
+        capturedDisplay = nil
+
+        do {
+            try clipboardService.writePNG(image)
+        } catch {
+            onCaptureFailed?(error)
+            leaveSession()
+            return
+        }
+
+        selectedImage = image
         state = .annotating
+        onSelectionCompleted?(image)
     }
 
     func finish() {
@@ -122,6 +145,7 @@ final class CaptureCoordinator {
         captureTask?.cancel()
         captureTask = nil
         capturedDisplay = nil
+        selectedImage = nil
         state = .idle
         onSessionEnded?()
     }

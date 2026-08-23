@@ -54,6 +54,7 @@ func test(_ name: String, body: @escaping () async throws -> Void) {
 private func runAllTests() async -> Int32 {
     registerCaptureCoordinatorTests()
     registerScreenGeometryTests()
+    registerSelectionTests()
     registerGlobalHotKeyTests()
 
     var failed = 0

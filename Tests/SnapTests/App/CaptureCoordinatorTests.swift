@@ -1,3 +1,4 @@
+import CoreGraphics
 @testable import SnapCore
 
 @MainActor
@@ -24,6 +25,30 @@ private final class CaptureServiceStub: ScreenCaptureServicing {
         captureCount += 1
         throw StubError.captureFailed
     }
+}
+
+@MainActor
+private final class ClipboardServiceStub: ClipboardServicing {
+    private(set) var writeCount = 0
+    private(set) var lastImage: CGImage?
+
+    func writePNG(_ image: CGImage) throws {
+        writeCount += 1
+        lastImage = image
+    }
+}
+
+private func coordinatorTestImage() -> CGImage {
+    let context = CGContext(
+        data: nil,
+        width: 2,
+        height: 2,
+        bitsPerComponent: 8,
+        bytesPerRow: 8,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    return context.makeImage()!
 }
 
 @MainActor
@@ -67,14 +92,40 @@ func registerCaptureCoordinatorTests() {
     }
 
     test("finish returns to idle from annotating") {
-        let coordinator = CaptureCoordinator(captureService: CaptureServiceStub())
+        let clipboard = ClipboardServiceStub()
+        let coordinator = CaptureCoordinator(
+            captureService: CaptureServiceStub(),
+            clipboardService: clipboard
+        )
+        var callbackImage: CGImage?
+        coordinator.onSelectionCompleted = { callbackImage = $0 }
         coordinator.handleCaptureRequest()
         coordinator.snapshotCaptured()
-        coordinator.selectionCompleted()
+        let image = coordinatorTestImage()
+        coordinator.selectionCompleted(with: image)
 
         try expectEqual(coordinator.state, .annotating)
+        try expectEqual(clipboard.writeCount, 1)
+        try expect(clipboard.lastImage === image)
+        try expect(callbackImage === image)
+        try expect(coordinator.selectedImage === image)
         coordinator.finish()
         try expectEqual(coordinator.state, .idle)
+        try expect(coordinator.selectedImage == nil)
+    }
+
+    test("selection cancel does not write the clipboard") {
+        let clipboard = ClipboardServiceStub()
+        let coordinator = CaptureCoordinator(
+            captureService: CaptureServiceStub(),
+            clipboardService: clipboard
+        )
+        coordinator.handleCaptureRequest()
+        coordinator.snapshotCaptured()
+        coordinator.cancel()
+
+        try expectEqual(coordinator.state, .idle)
+        try expectEqual(clipboard.writeCount, 0)
     }
 
     test("permission denied returns to idle") {
@@ -110,7 +161,7 @@ func registerCaptureCoordinatorTests() {
         coordinator.permissionGranted()
         coordinator.permissionDenied()
         coordinator.snapshotCaptured()
-        coordinator.selectionCompleted()
+        coordinator.selectionCompleted(with: coordinatorTestImage())
         coordinator.captureFailed()
         coordinator.finish()
 

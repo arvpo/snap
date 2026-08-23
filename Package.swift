@@ -29,6 +29,7 @@ let package = Package(
             exclude: [
                 "App",
                 "Capture",
+                "Selection",
                 "Services",
             ]
         ),
