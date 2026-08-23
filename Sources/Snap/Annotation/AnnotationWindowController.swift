@@ -38,6 +38,7 @@ final class AnnotationWindowController {
         canvasView.onUndo = { [weak self] in self?.undo() }
         canvasView.onFinish = { [weak self] in self?.finish() }
         canvasView.onCancel = { [weak self] in self?.finish() }
+        canvasView.onCopy = { [weak self] in self?.copyNow() }
         canvasView.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
 
         let toolbarSize = CGSize(width: 220, height: 44)
@@ -112,12 +113,29 @@ final class AnnotationWindowController {
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
+    private func copyNow() {
+        pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
+    }
+
+    /// `Enter`/`Esc`/done all land here. Hides the window immediately for a
+    /// responsive close, but waits for whatever render the last edit kicked
+    /// off before tearing down — otherwise a fast Enter right after a commit
+    /// could cancel that render and leave the clipboard one edit behind.
     private func finish() {
         guard !isFinishing, window != nil else { return }
         isFinishing = true
+        window?.orderOut(nil)
         let callback = onFinished
-        tearDown()
-        callback?()
+
+        Task { [weak self] in
+            await self?.pipeline.awaitPendingRender()
+            guard let self else {
+                callback?()
+                return
+            }
+            self.tearDown()
+            callback?()
+        }
     }
 
     private func tearDown() {
@@ -154,14 +172,23 @@ final class AnnotationWindowController {
             return CGRect(origin: .zero, size: pixelSize)
         }
 
+        // `pixelSize` is in physical pixels; convert to points on this
+        // screen first so a Retina capture doesn't open at 2x its natural
+        // on-screen size before the 85%-of-screen fit is even applied.
+        let backingScale = max(screen.backingScaleFactor, 1)
+        let nativePointSize = CGSize(
+            width: pixelSize.width / backingScale,
+            height: pixelSize.height / backingScale
+        )
+
         let maxSize = CGSize(
             width: screen.visibleFrame.width * 0.85,
             height: screen.visibleFrame.height * 0.85
         )
-        let scale = min(1, min(maxSize.width / pixelSize.width, maxSize.height / pixelSize.height))
+        let scale = min(1, min(maxSize.width / nativePointSize.width, maxSize.height / nativePointSize.height))
         let size = CGSize(
-            width: (pixelSize.width * scale).rounded(),
-            height: (pixelSize.height * scale).rounded()
+            width: (nativePointSize.width * scale).rounded(),
+            height: (nativePointSize.height * scale).rounded()
         )
         let origin = CGPoint(
             x: screen.visibleFrame.midX - size.width / 2,

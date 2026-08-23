@@ -12,22 +12,24 @@ final class AnnotationCanvasView: NSView {
     var onUndo: (() -> Void)?
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onCopy: (() -> Void)?
     var onToolSelected: ((AnnotationTool) -> Void)?
 
+    // Not layer-backed: `draw(_:)` paints the base image and every
+    // annotation into one bitmap per pass. Setting `layer.contents`
+    // separately while also overriding `draw(_:)` would be a mistake on a
+    // layer-backed view, since AppKit re-derives the layer's contents from
+    // `draw(_:)` on every display pass and would silently discard it.
+    private var baseImage: CGImage?
     private let imagePixelSize: CGSize
     private var committedAnnotations: [AnnotationValue] = []
     private var previewAnnotation: AnnotationValue?
     private var dragStart: CGPoint?
 
     init(baseImage: CGImage) {
+        self.baseImage = baseImage
         self.imagePixelSize = CGSize(width: baseImage.width, height: baseImage.height)
         super.init(frame: .zero)
-
-        wantsLayer = true
-        layer?.contents = baseImage
-        layer?.contentsGravity = .resize
-        layer?.magnificationFilter = .nearest
-        layer?.minificationFilter = .nearest
     }
 
     @available(*, unavailable)
@@ -50,11 +52,13 @@ final class AnnotationCanvasView: NSView {
         onUndo = nil
         onFinish = nil
         onCancel = nil
+        onCopy = nil
         onToolSelected = nil
         dragStart = nil
         previewAnnotation = nil
         committedAnnotations = []
-        layer?.contents = nil
+        baseImage = nil
+        needsDisplay = true
     }
 
     private var imageToViewScale: CGFloat {
@@ -101,10 +105,17 @@ final class AnnotationCanvasView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.command),
-           event.charactersIgnoringModifiers?.lowercased() == "z" {
-            onUndo?()
-            return
+        if event.modifierFlags.contains(.command) {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "z":
+                onUndo?()
+                return
+            case "c":
+                onCopy?()
+                return
+            default:
+                break
+            }
         }
 
         switch event.keyCode {
@@ -136,6 +147,13 @@ final class AnnotationCanvasView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        if let baseImage {
+            context.saveGState()
+            context.draw(baseImage, in: CGRect(origin: .zero, size: bounds.size))
+            context.restoreGState()
+        }
+
         let scale = imageToViewScale
         guard scale > 0 else { return }
 

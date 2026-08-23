@@ -98,6 +98,27 @@ func registerAnnotationRenderPipelineTests() {
         try expectEqual(clipboard.writeCount, 0)
     }
 
+    test("awaiting the pending render guarantees the latest edit reaches the clipboard") {
+        let clipboard = ClipboardServiceStub()
+        let gate = Gate()
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in
+            await gate.wait()
+            return image
+        }
+
+        let task = pipeline.scheduleRender(baseImage: markerImage(width: 7), annotations: [])
+
+        // Simulates closing the editor right after a commit, before its
+        // render has finished: `finish()` must not drop this edit.
+        async let awaited: Void = pipeline.awaitPendingRender()
+        await gate.open()
+        await awaited
+        await task.value
+
+        try expectEqual(clipboard.writeCount, 1)
+        try expectEqual(clipboard.writtenImages.first?.width, 7)
+    }
+
     test("rapid undo followed by a new render leaves the clipboard on the latest state") {
         let clipboard = ClipboardServiceStub()
         let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in image }

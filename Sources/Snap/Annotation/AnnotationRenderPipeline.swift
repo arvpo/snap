@@ -68,6 +68,13 @@ final class AnnotationRenderPipeline {
         currentTask?.cancel()
         currentTask = nil
     }
+
+    /// Waits for whatever render is currently in flight, if any, so callers
+    /// can be sure the most recent edit reached the clipboard before, say,
+    /// closing the editor. Safe to call with nothing pending.
+    func awaitPendingRender() async {
+        await currentTask?.value
+    }
 }
 
 /// `CGImage` is not `Sendable`; this box carries one across the actor

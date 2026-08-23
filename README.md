@@ -76,6 +76,7 @@ If `Cmd+Shift+X` is already taken by another app, that other binding wins until 
 | `R` | Outline rectangle |
 | `B` | Privacy block |
 | `Cmd+Z` | Undo |
+| `Cmd+C` | Re-copy the current annotated image to the clipboard |
 | `Delete` | Not implemented; selecting an existing annotation is out of scope for the MVP editor |
 | `Enter` | Finish and keep the latest clipboard image |
 | `Esc` | Cancel selection, or close the editor without rolling the clipboard back |
