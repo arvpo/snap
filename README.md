@@ -22,6 +22,27 @@ Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App St
 
 No file saving, history, upload, OCR, or preferences in the first version.
 
+## Install
+
+Needs macOS 14+ on Apple Silicon. The release zip is arm64 only.
+
+1. Download `Snap-0.1.0.zip` from the [latest GitHub release](https://github.com/arvpo/snap/releases/latest).
+2. Unzip it and move `Snap.app` to `/Applications`.
+3. Open it. The build is ad-hoc signed, so Gatekeeper will block a normal double-click. Right-click `Snap.app` → Open, or run:
+
+```bash
+xattr -cr /Applications/Snap.app
+open /Applications/Snap.app
+```
+
+Snap lives in the menu bar. There is no Dock icon.
+
+The first capture asks for Screen Recording access. Enable Snap in System Settings → Privacy & Security → Screen Recording, then press `Cmd+Shift+X` again.
+
+If another app already owns `Cmd+Shift+X`, that binding wins. The shortcut is not configurable yet.
+
+To build from source instead, use the Build section below.
+
 ## Memory rules
 
 These are not optional.
@@ -57,19 +78,13 @@ swift --version
 ```bash
 swift build
 swift test
-./scripts/build-app.sh
+make package
 open dist/Snap.app
 ```
 
-`scripts/build-app.sh` is the normal launch path. It assembles `dist/Snap.app`, copies `Resources/Info.plist`, and ad-hoc signs the bundle. macOS Screen Recording permission is tied to that bundle identifier, so do not run the raw SwiftPM binary as the daily target.
+`make package` runs `scripts/build-app.sh`. That assembles `dist/Snap.app`, copies `Resources/Info.plist`, and ad-hoc signs the bundle. macOS Screen Recording permission is tied to that bundle identifier, so do not run the raw SwiftPM binary as the daily target.
 
 Do not use `xcodebuild` for this project.
-
-## First launch
-
-The first capture will ask for Screen Recording access. Grant it in System Settings → Privacy & Security → Screen Recording, then trigger capture again.
-
-If `Cmd+Shift+X` is already taken by another app, that other binding wins until it is removed. The shortcut is not configurable in the MVP.
 
 ## Keyboard
 
