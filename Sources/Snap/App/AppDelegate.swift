@@ -18,9 +18,11 @@ public enum SnapApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = CaptureCoordinator()
+    private let clipboardService = ClipboardService()
     private var statusItem: NSStatusItem?
     private var hotKey: GlobalHotKey?
     private var selectionOverlay: SelectionOverlayController?
+    private var annotationEditor: AnnotationWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -30,11 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         coordinator.onSelectionCompleted = { [weak self] image in
             Logger.app.info("Copied \(image.width, privacy: .public) × \(image.height, privacy: .public) selection")
-            // Phase 4 will keep this session open and present the annotation editor.
-            self?.coordinator.finish()
+            self?.presentAnnotationEditor(for: image)
         }
         coordinator.onSessionEnded = { [weak self] in
             self?.dismissSelectionOverlay()
+            self?.dismissAnnotationEditor()
         }
         coordinator.onPermissionDenied = { [weak self] in
             self?.showScreenRecordingAccessAlert()
@@ -116,6 +118,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectionOverlay?.close()
         selectionOverlay = nil
         Logger.app.info("Capture session returned to idle")
+    }
+
+    private func presentAnnotationEditor(for image: CGImage) {
+        guard annotationEditor == nil else { return }
+        let controller = AnnotationWindowController(
+            baseImage: image,
+            clipboardService: clipboardService,
+            onFinished: { [weak self] in
+                self?.annotationEditor = nil
+                self?.coordinator.finish()
+            }
+        )
+        annotationEditor = controller
+        controller.show()
+    }
+
+    private func dismissAnnotationEditor() {
+        annotationEditor?.close()
+        annotationEditor = nil
     }
 
     private func showScreenRecordingAccessAlert() {

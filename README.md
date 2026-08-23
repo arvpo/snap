@@ -6,7 +6,7 @@ It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captur
 
 ## Status
 
-Phases 1 through 3 are implemented. Snap captures the display under the pointer, presents a full-screen region selector, and immediately copies a deep-copied crop to the clipboard. Mixed-display conversion and crop pixels are covered by automated tests. Annotation starts in Phase 4.
+Phases 1 through 4 are implemented. Snap captures the display under the pointer, presents a full-screen region selector, immediately copies a deep-copied crop to the clipboard, then opens an annotation editor with arrow, outline rectangle, and privacy block tools. Mixed-display conversion, crop pixels, annotation geometry, undo, and the render-generation guard are covered by automated tests. Integration, latency/memory measurement, and packaging polish are Phase 5.
 
 ## What it will do
 
@@ -76,7 +76,7 @@ If `Cmd+Shift+X` is already taken by another app, that other binding wins until 
 | `R` | Outline rectangle |
 | `B` | Privacy block |
 | `Cmd+Z` | Undo |
-| `Delete` | Remove selected annotation, if selection exists |
+| `Delete` | Not implemented; selecting an existing annotation is out of scope for the MVP editor |
 | `Enter` | Finish and keep the latest clipboard image |
 | `Esc` | Cancel selection, or close the editor without rolling the clipboard back |
 

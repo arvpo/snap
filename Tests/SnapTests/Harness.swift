@@ -56,6 +56,10 @@ private func runAllTests() async -> Int32 {
     registerScreenGeometryTests()
     registerSelectionTests()
     registerGlobalHotKeyTests()
+    registerAnnotationBuilderTests()
+    registerAnnotationDocumentTests()
+    registerImageRendererTests()
+    registerAnnotationRenderPipelineTests()
 
     var failed = 0
     for item in TestCatalog.tests {

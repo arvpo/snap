@@ -28,6 +28,7 @@ let package = Package(
             path: "Sources/Snap",
             exclude: [
                 "App",
+                "Annotation",
                 "Capture",
                 "Selection",
                 "Services",
