@@ -1,0 +1,3 @@
+import SnapCore
+
+SnapApp.run()
