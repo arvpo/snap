@@ -1,5 +1,7 @@
 # Fast macOS Screenshot App
 
+For the next upgrade, see [Phased plan: Snap annotation and speed upgrades](ANNOTATION_UPGRADE_PLAN.md).
+
 Native, menu-bar-only macOS app in Swift/AppKit. `Cmd+Shift+X` opens a Flameshot-style region selector on the monitor containing the pointer. The selected image is copied immediately, then recopied whenever an annotation is completed.
 
 The point of this project is speed and a hard memory ceiling. Flameshot can sit at 300 MB and climb toward 3 GB. Snap must not do that. A full-display capture may briefly cost one 4-byte-per-pixel buffer. After selection, only the crop remains. After the clipboard write and editor close, Snap must return near its idle baseline and retain no screenshot pixels.
