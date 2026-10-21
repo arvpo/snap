@@ -5,6 +5,7 @@ enum AnnotationTool: CaseIterable, Sendable {
     case arrow
     case rectangle
     case privacyBlock
+    case text
 }
 
 struct ArrowAnnotation: Equatable, Sendable {
@@ -125,6 +126,9 @@ enum AnnotationBuilder {
                 return nil
             }
             return .privacyBlock(PrivacyBlockAnnotation(rect: rect))
+        case .text:
+            // Text starts an editing transaction, never a completed shape.
+            return nil
         }
     }
 

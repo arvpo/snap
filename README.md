@@ -6,11 +6,11 @@ It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captur
 
 ## Status
 
-Phases 1 through 5 are implemented. Snap is a menu-bar app: global hotkey, pointer-display capture, region select, eager PNG clipboard, and a three-tool annotation editor. Automated tests cover mixed-display conversion, crop pixels, annotation geometry, undo, render-generation, coordinator transitions, presenter cancel/failure teardown, and 50-cycle session lifetime counters.
+Phases 1 through 5 are implemented. Snap is a menu-bar app: global hotkey, pointer-display capture, region select, eager PNG clipboard, and a four-tool annotation editor. Automated tests cover mixed-display conversion, crop pixels, annotation geometry, undo, render-generation, coordinator transitions, presenter cancel/failure teardown, and 50-cycle session lifetime counters.
 
 Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App Store release are a later phase.
 
-The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. The suite now has 90 passing tests. Text entry and marker placement controls arrive in phases 2 and 3.
+The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). The suite now has 104 passing tests. Numbered-marker placement remains in phase 3.
 
 ## What it does
 
@@ -18,7 +18,8 @@ The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately.
 - Start from `Cmd+Shift+X` or the menu-bar Capture item.
 - Freeze only the display containing the mouse, then let you drag a region.
 - Copy that crop to the clipboard immediately.
-- Annotate with a red arrow, a red outline rectangle, or an opaque black privacy block.
+- Annotate with a red arrow, a red outline rectangle, an opaque black privacy block, or text/callouts.
+- With Text selected, click to type or drag to set the wrapping width. Click existing text to edit it. The toolbar offers plain/callout, red/blue/green/yellow/black/white, and 14/18/24-point sizes. Defaults reset each capture.
 - Recopy the clipboard after every completed annotation.
 - Close with `Enter`. Cancel selection with `Esc`. Undo with `Cmd+Z`.
 
@@ -96,11 +97,17 @@ Do not use `xcodebuild` for this project.
 | `A` | Arrow |
 | `R` | Outline rectangle |
 | `B` | Privacy block |
-| `Cmd+Z` | Undo |
-| `Cmd+C` | Re-copy the current annotated image to the clipboard |
+| `T` | Text (click to type; drag for wrapping width) |
+| `Cmd+Z` | Undo text while editing; otherwise undo a completed annotation edit |
+| `Cmd+C` | Copy selected text while editing; otherwise publish the image and close |
 | `Delete` | Not implemented; selecting an existing annotation is out of scope for the MVP editor |
-| `Enter` | Finish and keep the latest clipboard image |
-| `Esc` | Cancel selection, or close the editor without rolling the clipboard back |
+| `Enter` | Commit active text; otherwise finish and publish the image |
+| `Shift+Enter` | Add a newline while editing text |
+| `Esc` | Cancel a text edit (or dismiss an active input-method composition); otherwise cancel selection or close the editor |
+
+Done commits active text and republishes the final image, including after text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
+
+Toolbar layout and small-crop chrome will be refined in upgrade phase 4. Live input-method candidate windows and mixed-display text sizing still need manual validation.
 
 ## Measurements
 

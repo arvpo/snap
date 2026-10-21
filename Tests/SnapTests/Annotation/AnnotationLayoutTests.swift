@@ -45,7 +45,7 @@ func registerAnnotationLayoutTests() {
             let layout = AnnotationLayout.text(text)!
             try expectEqual(CTFrameGetVisibleStringRange(layout.frame).length, (string as NSString).length)
             let image = try ImageRenderer.render(baseImage: makeTestCGImage(width: 80, height: 80), annotations: [.text(text)])
-            try expect(!paintedBounds(image).isNull)
+            try expect(!paintedBounds(image).isNull, "Missing ink for \(string)")
             try expect(layout.bounds.contains(paintedBounds(image)))
         }
     }

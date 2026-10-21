@@ -3,14 +3,14 @@ import CoreGraphics
 
 /// Owns the borderless annotation window, its canvas, and its toolbar for
 /// one session. `Enter`, `Cmd+C`, and the done button all close the editor
-/// and keep whatever is already on the clipboard; `Esc` closes the same way
+/// and publish the final annotated image; `Esc` closes the same way
 /// without rolling the clipboard back.
 @MainActor
 final class AnnotationWindowController {
-    private let document: AnnotationDocument
+    let document: AnnotationDocument
     private let pipeline: AnnotationRenderPipeline
     private var window: NSWindow?
-    private var canvasView: AnnotationCanvasView?
+    private(set) var canvasView: AnnotationCanvasView?
     private var toolbar: AnnotationToolbarView?
     private var isFinishing = false
 
@@ -41,12 +41,14 @@ final class AnnotationWindowController {
         canvasView.frame = CGRect(origin: .zero, size: windowFrame.size)
         canvasView.currentTool = document.currentTool
         canvasView.onCommit = { [weak self] value in self?.commit(value) }
+        canvasView.onTextCommit = { [weak self] session in self?.commitText(session) }
+        canvasView.onTextStyleChanged = { [weak self] style in self?.toolbar?.setTextStyle(style) }
         canvasView.onUndo = { [weak self] in self?.undo() }
         canvasView.onFinish = { [weak self] in self?.finish() }
         canvasView.onCancel = { [weak self] in self?.finish() }
         canvasView.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
 
-        let toolbarSize = CGSize(width: 220, height: 44)
+        let toolbarSize = CGSize(width: 250, height: 44)
         let toolbar = AnnotationToolbarView(
             frame: CGRect(
                 x: (windowFrame.width - toolbarSize.width) / 2,
@@ -58,6 +60,7 @@ final class AnnotationWindowController {
         toolbar.autoresizingMask = [.minXMargin, .maxXMargin]
         toolbar.setSelectedTool(document.currentTool)
         toolbar.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
+        toolbar.onTextStyleChanged = { [weak self] style in self?.canvasView?.setTextStyle(style) }
         toolbar.onUndo = { [weak self] in self?.undo() }
         toolbar.onDone = { [weak self] in self?.finish() }
         canvasView.addSubview(toolbar)
@@ -100,32 +103,49 @@ final class AnnotationWindowController {
         tearDown()
     }
 
-    private func selectTool(_ tool: AnnotationTool) {
+    func selectTool(_ tool: AnnotationTool) {
+        canvasView?.endTextEditing(commit: true)
         document.currentTool = tool
         canvasView?.currentTool = tool
         toolbar?.setSelectedTool(tool)
+        toolbar?.setFrameSize(CGSize(width: 250, height: tool == .text ? 78 : 44))
+        window?.makeFirstResponder(canvasView)
     }
 
     private func commit(_ value: AnnotationValue) {
         document.commit(value)
-        canvasView?.setAnnotations(document.annotations)
+        canvasView?.setAnnotations(document.entries)
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
+    private func commitText(_ session: TextEditingSession) {
+        guard session.commit(to: document) else { return }
+        canvasView?.setAnnotations(document.entries)
+        if !isFinishing {
+            pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
+        }
+    }
+
     private func undo() {
+        if let editor = canvasView?.textEditor {
+            editor.undoManager?.undo()
+            return
+        }
         guard document.undo() else { return }
-        canvasView?.setAnnotations(document.annotations)
+        canvasView?.setAnnotations(document.entries)
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
     /// `Enter`, `Cmd+C`, `Esc`, and the done button all land here. Hides the
-    /// window immediately for a responsive close, but waits for whatever
-    /// render the last edit kicked off before tearing down — otherwise a
-    /// fast Enter right after a commit could cancel that render and leave
-    /// the clipboard one edit behind.
-    private func finish() {
+    /// window immediately, commits active text, and waits for the final image
+    /// publication before teardown, including when native Copy replaced it.
+    func finish() {
         guard !isFinishing, window != nil else { return }
         isFinishing = true
+        canvasView?.endTextEditing(commit: true)
+        // Native Copy/Cut can replace the image with text even if there are no
+        // document changes. Always publish a fresh final snapshot on Done.
+        pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
         window?.orderOut(nil)
         let callback = onFinished
 

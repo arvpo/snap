@@ -1,19 +1,24 @@
 import AppKit
 
-/// The compact floating toolbar for arrow, outline rectangle, privacy block,
-/// undo, and done.
+/// The floating toolbar exposes text styles while Text is selected.
 @MainActor
 final class AnnotationToolbarView: NSView {
     var onToolSelected: ((AnnotationTool) -> Void)?
+    var onTextStyleChanged: ((TextStyle) -> Void)?
     var onUndo: (() -> Void)?
     var onDone: (() -> Void)?
 
+    private var style = TextStyle()
+    private let presentation = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let color = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let size = NSPopUpButton(frame: .zero, pullsDown: false)
     private var toolButtons: [AnnotationTool: NSButton] = [:]
     private var orderedButtons: [NSButton] = []
     private var separatorIndices: Set<Int> = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        appearance = NSAppearance(named: .darkAqua)
 
         wantsLayer = true
         layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.88).cgColor
@@ -30,7 +35,10 @@ final class AnnotationToolbarView: NSView {
         let privacyButton = addButton(symbol: "rectangle.fill", tooltip: "Privacy block  (B)") { [weak self] in
             self?.onToolSelected?(.privacyBlock)
         }
-        toolButtons = [.arrow: arrowButton, .rectangle: rectangleButton, .privacyBlock: privacyButton]
+        let textButton = addButton(symbol: "textformat", tooltip: "Text  (T)") { [weak self] in
+            self?.onToolSelected?(.text)
+        }
+        toolButtons = [.text: textButton, .arrow: arrowButton, .rectangle: rectangleButton, .privacyBlock: privacyButton]
 
         addSeparator()
 
@@ -41,6 +49,17 @@ final class AnnotationToolbarView: NSView {
             self?.onDone?()
         }
 
+        presentation.addItems(withTitles: ["Plain", "Callout"])
+        color.addItems(withTitles: ["Red", "Blue", "Green", "Yellow", "Black", "White"])
+        size.addItems(withTitles: ["14 pt", "18 pt", "24 pt"])
+        for (control, label) in [(presentation, "Text presentation"), (color, "Text color"), (size, "Font size")] {
+            control.target = self
+            control.action = #selector(changeStyle)
+            control.font = .systemFont(ofSize: 11)
+            control.setAccessibilityLabel(label)
+            addSubview(control)
+        }
+        setTextStyle(TextStyle())
         setSelectedTool(.arrow)
         layoutButtons()
     }
@@ -51,6 +70,7 @@ final class AnnotationToolbarView: NSView {
     }
 
     func setSelectedTool(_ tool: AnnotationTool) {
+        for control in [presentation, color, size] { control.isHidden = tool != .text }
         for (candidate, button) in toolButtons {
             button.contentTintColor = candidate == tool ? .systemRed : .white
         }
@@ -59,9 +79,25 @@ final class AnnotationToolbarView: NSView {
     /// Clears every closure so the toolbar retains nothing once the editor
     /// closes.
     func releaseResources() {
+        onTextStyleChanged = nil
         onToolSelected = nil
         onUndo = nil
         onDone = nil
+    }
+
+    func setTextStyle(_ style: TextStyle) {
+        self.style = style
+        presentation.selectItem(at: style.presentation == .plain ? 0 : 1)
+        color.selectItem(at: AnnotationColor.allCases.firstIndex(of: style.color) ?? 0)
+        let sizes: [CGFloat] = [14, 18, 24]
+        size.selectItem(at: sizes.indices.min(by: { abs(sizes[$0] - style.fontSize) < abs(sizes[$1] - style.fontSize) }) ?? 1)
+    }
+
+    @objc private func changeStyle(_ sender: NSPopUpButton) {
+        style.presentation = presentation.indexOfSelectedItem == 0 ? .plain : .callout
+        style.color = AnnotationColor.allCases[color.indexOfSelectedItem]
+        if sender === size { style.fontSize = [14.0, 18.0, 24.0][size.indexOfSelectedItem] }
+        onTextStyleChanged?(style)
     }
 
     override func layout() {
@@ -75,6 +111,7 @@ final class AnnotationToolbarView: NSView {
         button.imagePosition = .imageOnly
         button.bezelStyle = .regularSquare
         button.isBordered = false
+        button.refusesFirstResponder = true
         button.imageScaling = .scaleProportionallyUpOrDown
         button.contentTintColor = .white
         button.toolTip = tooltip
@@ -92,7 +129,10 @@ final class AnnotationToolbarView: NSView {
         let spacing: CGFloat = 6
         let separatorGap: CGFloat = 10
         var x: CGFloat = 8
-        let y = (bounds.height - buttonSize) / 2
+        let y = bounds.height - 35
+        presentation.frame = CGRect(x: 8, y: 7, width: 80, height: 24)
+        color.frame = CGRect(x: 89, y: 7, width: 78, height: 24)
+        size.frame = CGRect(x: 168, y: 7, width: 74, height: 24)
 
         for (index, button) in orderedButtons.enumerated() {
             if separatorIndices.contains(index) {
