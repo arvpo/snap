@@ -1,10 +1,11 @@
+import Foundation
 import AppKit
 @testable import SnapCore
 
 @MainActor
 private final class ToolbarClipboard: ClipboardServicing {
     var images: [CGImage] = []
-    func writePNG(_ image: CGImage) throws { images.append(image) }
+    func publishPNG(_ data: Data) throws { images.append(try decodedClipboardImage(data)) }
 }
 
 @MainActor

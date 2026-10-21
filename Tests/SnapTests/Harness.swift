@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 @testable import SnapCore
 
 public struct ExpectationError: Error, CustomStringConvertible {
@@ -71,6 +72,7 @@ private func runAllTests() async -> Int32 {
     registerAnnotationToolbarTests()
     registerImageRendererTests()
     registerAnnotationRenderPipelineTests()
+    registerAnnotationResponsivenessTests()
 
     var failed = 0
     for item in TestCatalog.tests {
@@ -162,4 +164,12 @@ func expectLifetimeZero(file: String = #fileID, line: Int = #line) throws {
             line: line
         )
     }
+}
+
+func decodedClipboardImage(_ data: Data) throws -> CGImage {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        throw ClipboardError.encodingFailed
+    }
+    return try ImageRenderer.render(baseImage: image, annotations: [])
 }

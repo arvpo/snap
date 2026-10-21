@@ -1,3 +1,4 @@
+import Foundation
 import CoreGraphics
 @testable import SnapCore
 
@@ -27,9 +28,9 @@ private final class IntegrationClipboardService: ClipboardServicing {
     private(set) var writeCount = 0
     private(set) var lastImage: CGImage?
 
-    func writePNG(_ image: CGImage) throws {
+    func publishPNG(_ data: Data) throws {
         writeCount += 1
-        lastImage = image
+        lastImage = try decodedClipboardImage(data)
     }
 }
 
@@ -78,6 +79,7 @@ func registerCaptureIntegrationTests() {
         try await waitUntil { coordinator.state == .selecting }
         let crop = makeTestCGImage(width: 4, height: 4)
         coordinator.selectionCompleted(with: crop)
+        try await waitUntil { coordinator.state == .annotating }
 
         try expectEqual(coordinator.state, .annotating)
         try expectEqual(clipboard.writeCount, 1)
@@ -147,6 +149,7 @@ func registerCaptureIntegrationTests() {
         coordinator.handleCaptureRequest()
         try await waitUntil { coordinator.state == .selecting }
         coordinator.selectionCompleted(with: makeTestCGImage())
+        try await waitUntil { coordinator.state == .annotating }
         try expectEqual(coordinator.state, .annotating)
         coordinator.finish()
 

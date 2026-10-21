@@ -1,3 +1,4 @@
+import Foundation
 import CoreGraphics
 @testable import SnapCore
 
@@ -35,10 +36,10 @@ private final class ClipboardServiceStub: ClipboardServicing {
     private(set) var lastImage: CGImage?
     var writeError: Error?
 
-    func writePNG(_ image: CGImage) throws {
+    func publishPNG(_ data: Data) throws {
         if let writeError { throw writeError }
         writeCount += 1
-        lastImage = image
+        lastImage = try decodedClipboardImage(data)
     }
 }
 
@@ -107,10 +108,11 @@ func registerCaptureCoordinatorTests() {
         coordinator.snapshotCaptured()
         let image = coordinatorTestImage()
         coordinator.selectionCompleted(with: image)
+        try await waitUntil { coordinator.state == .annotating }
 
         try expectEqual(coordinator.state, .annotating)
         try expectEqual(clipboard.writeCount, 1)
-        try expect(clipboard.lastImage === image)
+        try expectEqual(clipboard.lastImage?.width, image.width)
         try expect(callbackImage === image)
         try expect(coordinator.selectedImage === image)
         coordinator.finish()
@@ -229,7 +231,7 @@ func registerCaptureCoordinatorTests() {
         try expect(coordinator.capturedDisplay == nil)
     }
 
-    test("clipboard write failure during selection returns to idle") {
+    test("clipboard write failure keeps the crop for retry and Close cleans up") {
         let clipboard = ClipboardServiceStub()
         clipboard.writeError = ClipboardError.pasteboardWriteFailed
         let coordinator = CaptureCoordinator(
@@ -237,15 +239,20 @@ func registerCaptureCoordinatorTests() {
             clipboardService: clipboard
         )
         var failed = 0
-        coordinator.onCaptureFailed = { _ in failed += 1 }
+        coordinator.onClipboardFailed = { _ in failed += 1 }
         coordinator.handleCaptureRequest()
         coordinator.snapshotCaptured()
         coordinator.selectionCompleted(with: coordinatorTestImage())
-
-        try expectEqual(coordinator.state, .idle)
+        try await waitUntil { failed == 1 }
+        try expectEqual(coordinator.state, .preparingClipboard)
         try expectEqual(clipboard.writeCount, 0)
         try expectEqual(failed, 1)
-        try expect(coordinator.selectedImage == nil)
+        try expect(coordinator.selectedImage != nil)
         try expect(coordinator.capturedDisplay == nil)
+        coordinator.retryClipboard()
+        try await waitUntil { failed == 2 }
+        coordinator.cancel()
+        try expectEqual(coordinator.state, .idle)
+        try expect(coordinator.selectedImage == nil)
     }
 }

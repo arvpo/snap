@@ -1,3 +1,4 @@
+import Foundation
 import AppKit
 import CoreGraphics
 @testable import SnapCore
@@ -68,7 +69,7 @@ private func selectionKey(_ code: UInt16, _ characters: String = "", flags: NSEv
 @MainActor
 private final class SelectionClipboard: ClipboardServicing {
     var images: [CGImage] = []
-    func writePNG(_ image: CGImage) throws { images.append(image) }
+    func publishPNG(_ data: Data) throws { images.append(try decodedClipboardImage(data)) }
 }
 
 @MainActor

@@ -7,6 +7,7 @@ final class CaptureCoordinator {
         case requestingPermission
         case capturing
         case selecting
+        case preparingClipboard
         case annotating
     }
 
@@ -14,7 +15,7 @@ final class CaptureCoordinator {
     private(set) var capturedDisplay: CapturedDisplay?
     private(set) var selectedImage: CGImage?
     private let captureService: ScreenCaptureServicing
-    private let clipboardService: ClipboardServicing
+    private let clipboardPipeline: AnnotationRenderPipeline
     private var captureTask: Task<Void, Never>?
     private var sessionToken: CaptureSessionToken?
 
@@ -32,13 +33,26 @@ final class CaptureCoordinator {
 
     var onPermissionDenied: (() -> Void)?
     var onCaptureFailed: ((Error) -> Void)?
+    var onClipboardFailed: ((Error) -> Void)?
+    var onPreparingClipboard: (() -> Void)?
 
     init(
         captureService: ScreenCaptureServicing = ScreenCaptureService(),
-        clipboardService: ClipboardServicing = ClipboardService()
+        clipboardService: ClipboardServicing = ClipboardService(),
+        encode: @escaping AnnotationRenderPipeline.EncodeFunction = { try PNGEncoder.encode($0) }
     ) {
         self.captureService = captureService
-        self.clipboardService = clipboardService
+        self.clipboardPipeline = AnnotationRenderPipeline(clipboardService: clipboardService,
+            interval: .mouseUpToFirstClipboard, encode: encode)
+        clipboardPipeline.onPublished = { [weak self] in
+            guard let self, self.state == .preparingClipboard, let image = self.selectedImage else { return }
+            self.state = .annotating
+            self.onSelectionCompleted?(image)
+        }
+        clipboardPipeline.onRenderFailed = { [weak self] error in
+            guard let self, self.state == .preparingClipboard else { return }
+            self.onClipboardFailed?(error)
+        }
     }
 
     /// Menu and hotkey both enter here. Requests outside idle are ignored.
@@ -110,19 +124,16 @@ final class CaptureCoordinator {
     func selectionCompleted(with image: CGImage) {
         guard state == .selecting else { return }
         capturedDisplay = nil
-
-        do {
-            try clipboardService.writePNG(image)
-            CaptureSignposts.shared.end(.mouseUpToFirstClipboard)
-        } catch {
-            onCaptureFailed?(error)
-            leaveSession()
-            return
-        }
-
         selectedImage = image
-        state = .annotating
-        onSelectionCompleted?(image)
+        state = .preparingClipboard
+        onPreparingClipboard?()
+        guard state == .preparingClipboard, selectedImage === image else { return }
+        clipboardPipeline.scheduleRender(baseImage: image, annotations: [], startInterval: false)
+    }
+
+    func retryClipboard() {
+        guard state == .preparingClipboard, let selectedImage else { return }
+        clipboardPipeline.scheduleRender(baseImage: selectedImage, annotations: [])
     }
 
     func finish() {
@@ -148,6 +159,7 @@ final class CaptureCoordinator {
     }
 
     private func leaveSession() {
+        clipboardPipeline.invalidate()
         captureTask?.cancel()
         captureTask = nil
         capturedDisplay = nil

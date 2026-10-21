@@ -1,13 +1,24 @@
+import Foundation
 import CoreGraphics
 @testable import SnapCore
 
 private actor Gate {
     private var isOpen = false
     private var continuation: CheckedContinuation<Void, Never>?
+    private var entryContinuation: CheckedContinuation<Void, Never>?
+    private var entered = false
 
     func wait() async {
+        entered = true
+        entryContinuation?.resume()
+        entryContinuation = nil
         if isOpen { return }
         await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitForEntry() async {
+        if entered { return }
+        await withCheckedContinuation { entryContinuation = $0 }
     }
 
     func open() {
@@ -22,9 +33,9 @@ private final class ClipboardServiceStub: ClipboardServicing {
     private(set) var writeCount = 0
     private(set) var writtenImages: [CGImage] = []
 
-    func writePNG(_ image: CGImage) throws {
+    func publishPNG(_ data: Data) throws {
         writeCount += 1
-        writtenImages.append(image)
+        writtenImages.append(try decodedClipboardImage(data))
     }
 }
 
@@ -45,7 +56,7 @@ private func markerImage(width: Int) -> CGImage {
 func registerAnnotationRenderPipelineTests() {
     test("a completed render publishes exactly one clipboard write") {
         let clipboard = ClipboardServiceStub()
-        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in image }
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard, render: { image, _ in image })
 
         let task = pipeline.scheduleRender(baseImage: markerImage(width: 3), annotations: [])
         await task.value
@@ -60,21 +71,23 @@ func registerAnnotationRenderPipelineTests() {
         let slowImage = markerImage(width: 2)
         let fastImage = markerImage(width: 4)
 
-        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard, render: { image, _ in
             if image.width == 2 {
                 await gate.wait()
             }
             return image
-        }
+        })
 
         let staleTask = pipeline.scheduleRender(baseImage: slowImage, annotations: [])
+        await gate.waitForEntry()
         let freshTask = pipeline.scheduleRender(baseImage: fastImage, annotations: [])
-
+        let writesWhileBlocked = clipboard.writeCount
+        await gate.open()
         await freshTask.value
+        try expectEqual(writesWhileBlocked, 0)
         try expectEqual(clipboard.writeCount, 1)
         try expectEqual(clipboard.writtenImages.first?.width, 4)
 
-        await gate.open()
         await staleTask.value
 
         try expect(clipboard.writeCount == 1, "a stale render must not overwrite the newer clipboard write")
@@ -84,10 +97,10 @@ func registerAnnotationRenderPipelineTests() {
         let clipboard = ClipboardServiceStub()
         let gate = Gate()
 
-        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard, render: { image, _ in
             await gate.wait()
             return image
-        }
+        })
 
         let task = pipeline.scheduleRender(baseImage: markerImage(width: 5), annotations: [])
         pipeline.invalidate()
@@ -101,18 +114,18 @@ func registerAnnotationRenderPipelineTests() {
     test("awaiting the pending render guarantees the latest edit reaches the clipboard") {
         let clipboard = ClipboardServiceStub()
         let gate = Gate()
-        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard, render: { image, _ in
             await gate.wait()
             return image
-        }
+        })
 
         let task = pipeline.scheduleRender(baseImage: markerImage(width: 7), annotations: [])
 
         // Simulates closing the editor right after a commit, before its
         // render has finished: `finish()` must not drop this edit.
-        async let awaited: Void = pipeline.awaitPendingRender()
+        async let awaited: Bool = pipeline.awaitPendingRender()
         await gate.open()
-        await awaited
+        _ = await awaited
         await task.value
 
         try expectEqual(clipboard.writeCount, 1)
@@ -121,7 +134,7 @@ func registerAnnotationRenderPipelineTests() {
 
     test("rapid undo followed by a new render leaves the clipboard on the latest state") {
         let clipboard = ClipboardServiceStub()
-        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in image }
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard, render: { image, _ in image })
 
         var lastTask = pipeline.scheduleRender(baseImage: markerImage(width: 1), annotations: [])
         for width in 2...5 {

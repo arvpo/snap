@@ -116,5 +116,5 @@ private final class SignpostCaptureService: ScreenCaptureServicing {
 
 @MainActor
 private final class SignpostClipboardService: ClipboardServicing {
-    func writePNG(_ image: CGImage) throws {}
+    func publishPNG(_ data: Data) throws {}
 }

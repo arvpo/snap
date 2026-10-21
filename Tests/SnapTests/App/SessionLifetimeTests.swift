@@ -1,10 +1,11 @@
+import Foundation
 import AppKit
 import CoreGraphics
 @testable import SnapCore
 
 @MainActor
 private final class LifetimeClipboardService: ClipboardServicing {
-    func writePNG(_ image: CGImage) throws {}
+    func publishPNG(_ data: Data) throws {}
 }
 
 @MainActor
@@ -32,6 +33,7 @@ func registerSessionLifetimeTests() {
             coordinator.handleCaptureRequest()
             try await waitUntil { coordinator.state == .selecting }
             coordinator.selectionCompleted(with: makeTestCGImage())
+            try await waitUntil { coordinator.state == .annotating }
             try expectEqual(coordinator.state, .annotating)
             coordinator.finish()
             try expectEqual(coordinator.state, .idle)
@@ -94,7 +96,7 @@ func registerSessionLifetimeTests() {
     test("render tasks return to zero after completion and invalidation") {
         SessionLifetime.reset()
         let clipboard = LifetimeClipboardService()
-        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard) { image, _ in image }
+        let pipeline = AnnotationRenderPipeline(clipboardService: clipboard, render: { image, _ in image })
 
         let completed = pipeline.scheduleRender(baseImage: makeTestCGImage(), annotations: [])
         try expectEqual(SessionLifetime.count(of: .renderTask), 1)

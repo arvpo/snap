@@ -10,7 +10,9 @@ Phases 1 through 5 of the original plan are implemented. Snap is a menu-bar app:
 
 Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App Store release are a later phase.
 
-The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). Phase 3 adds repeated numbered-marker placement and selection, movement, deletion, and text-box width adjustment. All 119 tests pass.
+The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). Phase 3 adds repeated numbered-marker placement and selection, movement, deletion, and text-box width adjustment. Phase 4 moves the compact toolbar into editor chrome and adds contextual styling, keyboard focus, and accessibility. Phase 5 moves PNG encoding off the main actor, bounds background image work, redraws changed canvas regions, and provides retryable clipboard errors.
+
+The upgrade suite currently passes all **139 tests** through `scripts/test-appkit.sh`; debug and release builds pass. Real capture/display/memory validation remains in upgrade phase 6.
 
 ## What it does
 
@@ -23,7 +25,8 @@ The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately.
 - With Number selected, click repeatedly to place markers starting at 1. Circles start at 28 display points and grow for longer labels. Moving markers preserves their order; deletion closes gaps.
 - With Select selected, click text or a marker to select it, drag to move, and press Delete to remove it. Drag the right-side text handle to change wrapping width; double-click selected text to edit. Each completed gesture is one undo step. Selection outlines and handles never appear in clipboard images.
 - Keep the compact toolbar above the image, with surrounding space for tiny crops. Arrow is selected initially. Text style is available while Text is selected or an existing text annotation is being edited. Tab/Shift+Tab navigates the toolbar; Undo reflects the active text or document history. Editor chrome never appears in exports.
-- Recopy the clipboard after every completed annotation.
+- Recopy the clipboard after completed edits. Rapid edits replace one pending snapshot while a single render/encode worker finishes; only the newest valid result is published. Typing and drag previews never encode PNGs.
+- Retry a failed clipboard update, or choose Close to cancel the session. Done waits for successful publication; Escape invalidates pending output and keeps whatever is already on the clipboard.
 - Close with `Enter`. Cancel selection with `Esc`. Undo with `Cmd+Z`.
 
 No file saving, history, upload, OCR, or preferences in the first version.
@@ -56,8 +59,8 @@ These are not optional.
 - Idle after launch settles: under 35 MB resident.
 - During selection: at most one 4-byte-per-pixel buffer for the pointer’s display, plus 35 MB overhead. Unused monitors are never captured.
 - During annotation: the cropped base image, at most one in-progress output buffer, one encoded PNG, plus 35 MB overhead. Undo stores vectors, not bitmaps.
-- After each clipboard write: Snap retains no encoded PNG and no completed render buffer. The pasteboard process owns the copy.
-- After the editor closes: Snap retains no screenshot pixels. Resident memory must return to within 10 MB of the pre-capture baseline within two seconds.
+- After each clipboard write: Snap drops its PNG payload and completed task references; the rendered buffer has already been released by the background worker. The pasteboard process owns the copy.
+- After cancellation, pending snapshots and UI references are released immediately. A synchronous Core Graphics/ImageIO call already executing must drain before its local buffers can be released; its output is invalidated and it shares a single worker lane with the next capture. After cleanup, Snap retains no screenshot pixels. Resident memory must return to within 10 MB of the pre-capture baseline within two seconds.
 - Fifty capture/select/annotate/close cycles must not grow resident memory, must leave zero live session objects, and must show no definitely lost Snap-owned allocations under `leaks`.
 
 A 5K display buffer is about 59 MB. That spike is allowed only while the overlay is up. It must be gone after selection or cancel.
@@ -70,7 +73,7 @@ On this machine the built-in display is 2560×1664 Retina. One 4-byte buffer is 
 - Under 100 ms from completed snapshot to overlay.
 - Under 50 ms from mouse-up to clipboard refresh for an ordinary region.
 
-Instruments: attach Snap and filter `com.stradeon.Snap` / `latency`. The intervals are `hotkey-to-snapshot`, `snapshot-to-overlay`, `mouse-up-to-first-clipboard`, and `annotation-mouse-up-to-clipboard`.
+Instruments: attach Snap and filter `com.stradeon.Snap` / `latency`. The overall intervals are `hotkey-to-snapshot`, `snapshot-to-overlay`, `mouse-up-to-first-clipboard`, and `annotation-mouse-up-to-clipboard`. Separate `annotation-render`, `png-encode`, and `clipboard-publication` intervals distinguish background image work from main-actor pasteboard publication.
 
 ## Build
 
@@ -112,13 +115,24 @@ Do not use `xcodebuild` for this project.
 | `Shift+Enter` | Add a newline while editing text |
 | `Esc` | Cancel active text/gesture, then clear annotation selection; otherwise cancel capture selection or close the editor |
 
-Done commits active text and republishes the final image, including after text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
+Done commits active text and republishes the final image, including after text Copy/Cut. If publication fails, Retry completes Done after a successful write; Close cancels. Escape closes without waiting for a pending image write or restoring a clipboard image replaced by native text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
 
-Toolbar layout and small-crop chrome will be refined in upgrade phase 4. Live input-method candidate windows and mixed-display text sizing still need manual validation.
+The toolbar and small-crop chrome are implemented. Live input-method candidate windows, VoiceOver, popover placement, and mixed-display text sizing still need manual validation.
 
 Marker circles and moved text boxes stay within the crop when they fit. Oversized text can be moved across its visible extent, and markers larger than a tiny crop are centered and clipped. Text wrapping is limited to the available width; very tall text and marker shadows can clip at image edges. Geometry tests cover 1×, Retina (0.5×), and scaled-to-fit (0.25×) canvas transforms; real mixed-display validation remains pending.
 
 ## Measurements
+
+Upgrade phase 5 measurements (2026-10-21, debug AppKit runner, synthetic 800×600 base and three shapes):
+
+| Probe | Before phase 5 | After phase 5 |
+| --- | --- | --- |
+| One-shot crop + PNG encode; no publication | 8.93 ms | 10.61 ms |
+| One-shot annotation render + PNG encode; no publication | 7.48 ms | 7.05 ms |
+| Full background pipeline + real pasteboard publication, 30 warmed samples | not recorded | 2.73 ms p95 |
+| Background render / encode / main-actor publication, separate stage p95s | not recorded | 0.28 / 2.35 / 0.09 ms |
+
+The pipeline probe uses two warmup iterations before the 30 samples. These warmed measurements are not directly comparable to the one-shot probes and do not prove a real-capture latency target. Real screenshots, large images with 100 mixed annotations, frame-time measurements, and live memory/leak checks remain for phase 6. Automated tests do verify background execution, one-worker concurrency, stale-result rejection, and release of output pixels and PNGs after success or cancellation.
 
 Recorded 2026-08-23 on an Apple M4, built-in 2560×1664 Retina display, no external monitors. Interactive capture, selection-spike, and post-editor RSS were not taken in this session.
 

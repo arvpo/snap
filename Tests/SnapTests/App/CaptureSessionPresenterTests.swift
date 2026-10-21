@@ -1,3 +1,4 @@
+import Foundation
 import CoreGraphics
 @testable import SnapCore
 
@@ -60,7 +61,7 @@ private final class PresenterClipboardService: ClipboardServicing {
     var writeError: Error?
     private(set) var writeCount = 0
 
-    func writePNG(_ image: CGImage) throws {
+    func publishPNG(_ data: Data) throws {
         if let writeError { throw writeError }
         writeCount += 1
     }
@@ -76,6 +77,7 @@ private final class PresenterHarness {
     let presenter: CaptureSessionPresenter
     private(set) var permissionDeniedCount = 0
     private(set) var captureFailedCount = 0
+    private(set) var clipboardFailedCount = 0
 
     private init(
         service: PresenterCaptureService,
@@ -128,6 +130,7 @@ private final class PresenterHarness {
         )
         presenter.onPermissionDenied = { harness.permissionDeniedCount += 1 }
         presenter.onCaptureFailed = { _ in harness.captureFailedCount += 1 }
+        presenter.onClipboardFailed = { _ in harness.clipboardFailedCount += 1 }
         presenter.bind()
         return harness
     }
@@ -150,6 +153,7 @@ func registerCaptureSessionPresenterTests() {
         harness.presenter.handleCaptureRequest()
         try await waitUntil { harness.coordinator.state == .selecting }
         harness.coordinator.selectionCompleted(with: makeTestCGImage())
+        try await waitUntil { harness.coordinator.state == .annotating }
 
         try expectEqual(harness.coordinator.state, .annotating)
         try expectEqual(harness.overlay.closeCount, 1)
@@ -201,12 +205,17 @@ func registerCaptureSessionPresenterTests() {
         harness.presenter.handleCaptureRequest()
         try await waitUntil { harness.coordinator.state == .selecting }
         harness.coordinator.selectionCompleted(with: makeTestCGImage())
-
-        try expectEqual(harness.coordinator.state, .idle)
+        try await waitUntil { harness.clipboardFailedCount == 1 }
+        try expectEqual(harness.coordinator.state, .preparingClipboard)
         try expectEqual(harness.editor.showCount, 0)
         try expect(harness.presenter.overlay == nil)
         try expect(harness.presenter.editor == nil)
-        try expectEqual(harness.captureFailedCount, 1)
+        try expectEqual(harness.clipboardFailedCount, 1)
+        harness.clipboard.writeError = nil
+        harness.coordinator.retryClipboard()
+        try await waitUntil { harness.coordinator.state == .annotating }
+        try expectEqual(harness.editor.showCount, 1)
+        harness.coordinator.cancel()
     }
 
     test("finishing the editor returns to idle and drops both windows") {
@@ -214,6 +223,7 @@ func registerCaptureSessionPresenterTests() {
         harness.presenter.handleCaptureRequest()
         try await waitUntil { harness.coordinator.state == .selecting }
         harness.coordinator.selectionCompleted(with: makeTestCGImage())
+        try await waitUntil { harness.coordinator.state == .annotating }
         harness.editor.finishFromUI()
 
         try expectEqual(harness.coordinator.state, .idle)

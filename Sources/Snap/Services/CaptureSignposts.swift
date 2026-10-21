@@ -5,9 +5,12 @@ enum CaptureInterval: String, CaseIterable, Sendable {
     case snapshotToOverlay = "snapshot-to-overlay"
     case mouseUpToFirstClipboard = "mouse-up-to-first-clipboard"
     case annotationMouseUpToClipboard = "annotation-mouse-up-to-clipboard"
+    case annotationRender = "annotation-render"
+    case pngEncode = "png-encode"
+    case clipboardPublication = "clipboard-publication"
 }
 
-/// `os_signpost` intervals for the four Phase 5 latency gates.
+/// End-to-end capture intervals and individual image preparation/publication timings.
 ///
 /// Begin/end also record wall-clock milliseconds so Instruments is not the
 /// only way to see a miss. Starting an interval that is already open closes
@@ -22,6 +25,10 @@ final class CaptureSignposts {
 
     /// Most recent completed duration per interval, in milliseconds.
     private(set) var lastDurationsMilliseconds: [CaptureInterval: Double] = [:]
+
+    func record(_ interval: CaptureInterval, milliseconds: Double) {
+        lastDurationsMilliseconds[interval] = milliseconds
+    }
 
     func begin(_ interval: CaptureInterval) {
         abandon(interval)
@@ -66,6 +73,12 @@ final class CaptureSignposts {
             signposter.beginInterval("mouse-up-to-first-clipboard")
         case .annotationMouseUpToClipboard:
             signposter.beginInterval("annotation-mouse-up-to-clipboard")
+        case .annotationRender:
+            signposter.beginInterval("annotation-render")
+        case .pngEncode:
+            signposter.beginInterval("png-encode")
+        case .clipboardPublication:
+            signposter.beginInterval("clipboard-publication")
         }
     }
 
@@ -79,6 +92,12 @@ final class CaptureSignposts {
             signposter.endInterval("mouse-up-to-first-clipboard", state)
         case .annotationMouseUpToClipboard:
             signposter.endInterval("annotation-mouse-up-to-clipboard", state)
+        case .annotationRender:
+            signposter.endInterval("annotation-render", state)
+        case .pngEncode:
+            signposter.endInterval("png-encode", state)
+        case .clipboardPublication:
+            signposter.endInterval("clipboard-publication", state)
         }
     }
 }

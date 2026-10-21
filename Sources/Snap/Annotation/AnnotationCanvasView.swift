@@ -11,42 +11,63 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         didSet {
             cancelGesture()
             if currentTool != .select { selectedAnnotationID = nil }
-            needsDisplay = true
         }
     }
     var textStyle = TextStyle()
     var onTextCommit: ((TextEditingSession) -> Void)?
     var onEditingStateChanged: (() -> Void)?
     var onTextStyleChanged: ((TextStyle) -> Void)?
-    private(set) var textSession: TextEditingSession?
+    private(set) var textSession: TextEditingSession? {
+        didSet {
+            invalidateTextSession(oldValue)
+            invalidateTextSession(textSession)
+        }
+    }
     private(set) var textEditor: AnnotationTextView?
     private var entries: [Annotation] = []
+    private var annotationBounds: [UUID: CGRect] = [:]
+    // Useful for verifying dirty-rectangle culling without changing export rendering.
+    private(set) var lastDrawnAnnotationCount = 0
     var onCommit: ((AnnotationValue) -> Void)?
     var onUpdate: ((UUID, AnnotationValue) -> Void)?
     var onDelete: ((UUID) -> Void)?
-    private(set) var selectedAnnotationID: UUID?
+    private(set) var selectedAnnotationID: UUID? {
+        didSet {
+            invalidateImageRect(oldValue.flatMap { annotationBounds[$0] })
+            invalidateImageRect(selectedAnnotationID.flatMap { annotationBounds[$0] })
+        }
+    }
     private struct Manipulation {
         let entry: Annotation
         let start: CGPoint
         let resizing: Bool
         var preview: AnnotationValue?
     }
-    private var manipulation: Manipulation?
+    private var manipulation: Manipulation? {
+        didSet {
+            invalidateValue(oldValue.map { $0.preview ?? $0.entry.value })
+            invalidateValue(manipulation.map { $0.preview ?? $0.entry.value })
+        }
+    }
     var onUndo: (() -> Void)?
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
     var onToolSelected: ((AnnotationTool) -> Void)?
 
-    // Not layer-backed: `draw(_:)` paints the base image and every
-    // annotation into one bitmap per pass. Setting `layer.contents`
+    // Not layer-backed: `draw(_:)` paints the base image and intersecting
+    // annotations into AppKit's clipped backing store. Setting `layer.contents`
     // separately while also overriding `draw(_:)` would be a mistake on a
     // layer-backed view, since AppKit re-derives the layer's contents from
     // `draw(_:)` on every display pass and would silently discard it.
     private var baseImage: CGImage?
     private let imagePixelSize: CGSize
-    private var previewAnnotation: AnnotationValue?
+    private var previewAnnotation: AnnotationValue? {
+        didSet { invalidateValue(oldValue); invalidateValue(previewAnnotation) }
+    }
     private var dragStart: CGPoint?
-    private var textDragRect: CGRect?
+    private var textDragRect: CGRect? {
+        didSet { invalidateImageRect(oldValue); invalidateImageRect(textDragRect) }
+    }
 
     init(baseImage: CGImage) {
         self.baseImage = baseImage
@@ -69,11 +90,56 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     override var acceptsFirstResponder: Bool { true }
 
     func setAnnotations(_ entries: [Annotation]) {
+        let oldEntries = Dictionary(uniqueKeysWithValues: self.entries.map { ($0.id, $0.value) })
+        let newEntries = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.value) })
+        var newBounds: [UUID: CGRect] = [:]
+        for entry in entries {
+            let unchanged = oldEntries[entry.id] == entry.value
+            let rect = unchanged ? annotationBounds[entry.id] ?? AnnotationLayout.bounds(of: entry.value)
+                                 : AnnotationLayout.bounds(of: entry.value)
+            newBounds[entry.id] = rect
+            if !unchanged {
+                invalidateImageRect(annotationBounds[entry.id])
+                invalidateImageRect(rect)
+            }
+        }
+        for entry in self.entries where newEntries[entry.id] == nil {
+            invalidateImageRect(annotationBounds[entry.id])
+        }
+        // Reordering changes overlapping pixels even when all values are equal.
+        if self.entries.filter({ newEntries[$0.id] != nil }).map(\.id)
+            != entries.filter({ oldEntries[$0.id] != nil }).map(\.id) {
+            for entry in entries { invalidateImageRect(newBounds[entry.id]) }
+        }
         self.entries = entries
-        if let selectedAnnotationID, !entries.contains(where: { $0.id == selectedAnnotationID }) {
+        annotationBounds = newBounds
+        if let selectedAnnotationID, newEntries[selectedAnnotationID] == nil {
             self.selectedAnnotationID = nil
         }
-        needsDisplay = true
+    }
+
+    private func invalidateValue(_ value: AnnotationValue?) {
+        invalidateImageRect(value.map { AnnotationLayout.bounds(of: $0) })
+    }
+
+    private func invalidateTextSession(_ session: TextEditingSession?) {
+        guard let session else { return }
+        if let id = session.annotationID { invalidateImageRect(annotationBounds[id]) }
+        var draft = session.draft
+        if draft.text.isEmpty { draft.text = "\u{200B}" }
+        invalidateValue(.text(draft))
+    }
+
+    private func invalidateImageRect(_ rect: CGRect?) {
+        guard let rect, !rect.isNull else { return }
+        let scale = imageToViewScale
+        // Includes antialias fringes, dashed selection borders and width handles.
+        let viewRect = CGRect(x: rect.minX * scale, y: rect.minY * scale,
+                              width: rect.width * scale, height: rect.height * scale)
+            .insetBy(dx: -8, dy: -8).intersection(bounds)
+        if !viewRect.isNull { setNeedsDisplay(viewRect) }
+        // AppKit coalesces invalidations until its next display pass. Do not
+        // call display() from event handling or encode a gesture preview.
     }
 
     /// Clears every closure and retained pixel so the view can deinitialize
@@ -84,6 +150,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         onTextStyleChanged = nil
         onEditingStateChanged = nil
         entries = []
+        annotationBounds = [:]
         onCommit = nil
         onUpdate = nil
         onDelete = nil
@@ -129,7 +196,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             let hit = AnnotationSelection.hitTest(point, entries: entries, scale: imageToViewScale)
             let wasSelected = hit?.id == selectedAnnotationID
             selectedAnnotationID = hit?.id
-            needsDisplay = true
             if let hit {
                 if wasSelected, event.clickCount >= 2, case .text(let text) = hit.value {
                     beginTextEditing(TextEditingSession(annotationID: hit.id, draft: text))
@@ -168,7 +234,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             to: current,
             minimumSize: 0
         )
-        needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -176,7 +241,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             updateManipulation(to: imagePoint(from: event))
             let completed = manipulation
             manipulation = nil
-            needsDisplay = true
             if let completed, let preview = completed.preview, preview != completed.entry.value {
                 onUpdate?(completed.entry.id, preview)
             }
@@ -187,7 +251,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         self.dragStart = nil
         textDragRect = nil
         previewAnnotation = nil
-        needsDisplay = true
 
         if currentTool == .text {
             var style = textStyle
@@ -238,7 +301,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             }
             if selectedAnnotationID != nil {
                 selectedAnnotationID = nil
-                needsDisplay = true
                 return
             }
             onCancel?()
@@ -317,7 +379,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         window?.makeFirstResponder(editor)
         editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
         onEditingStateChanged?()
-        needsDisplay = true
     }
 
     func cancelGesture() {
@@ -325,7 +386,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         dragStart = nil
         textDragRect = nil
         previewAnnotation = nil
-        needsDisplay = true
     }
 
     private func updateManipulation(to point: CGPoint) {
@@ -341,7 +401,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             gesture.preview = AnnotationSelection.moved(gesture.entry.value, by: offset, imageSize: imagePixelSize)
         }
         manipulation = gesture
-        needsDisplay = true
     }
 
     func setTextStyle(_ style: TextStyle, restoreFocus: Bool = true) {
@@ -362,7 +421,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         textSession?.draft.text = editor.string
         onEditingStateChanged?()
         layoutTextEditor()
-        needsDisplay = true
     }
 
     func endTextEditing(commit: Bool) {
@@ -377,7 +435,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
         textEditor = nil
         textSession = nil
-        needsDisplay = true
         if commit { onTextCommit?(session) }
         onEditingStateChanged?()
     }
@@ -393,7 +450,6 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         editor.insertionPointColor = color
         editor.typingAttributes = [.font: font, .foregroundColor: color]
         layoutTextEditor()
-        needsDisplay = true
     }
 
     private func layoutTextEditor() {
@@ -416,6 +472,9 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.clip(to: dirtyRect)
 
         if let baseImage {
             // `CGContext.draw(_:in:)` has its own fixed sense of "up" that
@@ -424,6 +483,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             // just for this call. Path-based annotation drawing below has
             // no such quirk and needs no adjustment.
             context.saveGState()
+            context.setBlendMode(.copy)
             context.translateBy(x: 0, y: bounds.height)
             context.scaleBy(x: 1, y: -1)
             context.draw(baseImage, in: CGRect(origin: .zero, size: bounds.size))
@@ -435,8 +495,16 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
         context.saveGState()
         context.scaleBy(x: scale, y: scale)
+        context.setShouldAntialias(false)
+        let dirtyImageRect = CGRect(x: dirtyRect.minX / scale, y: dirtyRect.minY / scale,
+                                    width: dirtyRect.width / scale, height: dirtyRect.height / scale)
+        lastDrawnAnnotationCount = 0
         for entry in entries where entry.id != textSession?.annotationID {
             let value = entry.id == manipulation?.entry.id ? manipulation?.preview ?? entry.value : entry.value
+            let rect = entry.id == manipulation?.entry.id ? AnnotationLayout.bounds(of: value)
+                : annotationBounds[entry.id] ?? .null
+            guard rect.intersects(dirtyImageRect) else { continue }
+            lastDrawnAnnotationCount += 1
             ImageRenderer.draw(value, in: context)
         }
         // The native editor draws the glyphs; use the shared layout for its

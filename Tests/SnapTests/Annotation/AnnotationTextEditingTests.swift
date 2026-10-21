@@ -1,3 +1,4 @@
+import Foundation
 import AppKit
 import CoreGraphics
 @testable import SnapCore
@@ -27,7 +28,7 @@ private func mouse(_ type: NSEvent.EventType, at point: CGPoint, in canvas: NSVi
 @MainActor
 private final class TextClipboard: ClipboardServicing {
     var images: [CGImage] = []
-    func writePNG(_ image: CGImage) throws { images.append(image) }
+    func publishPNG(_ data: Data) throws { images.append(try decodedClipboardImage(data)) }
 }
 
 @MainActor

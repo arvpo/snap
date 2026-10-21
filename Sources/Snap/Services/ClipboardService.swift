@@ -22,13 +22,12 @@ enum ClipboardError: LocalizedError {
 
 @MainActor
 protocol ClipboardServicing: AnyObject {
-    func writePNG(_ image: CGImage) throws
+    func publishPNG(_ data: Data) throws
 }
 
-/// Performs one eager write and retains no image or encoded data afterward.
-@MainActor
-final class ClipboardService: ClipboardServicing {
-    func writePNG(_ image: CGImage) throws {
+/// ImageIO work runs on the render worker, never on the UI actor.
+enum PNGEncoder {
+    static func encode(_ image: CGImage) throws -> Data {
         try autoreleasepool {
             let encodedPNG = NSMutableData()
             guard let destination = CGImageDestinationCreateWithData(
@@ -45,9 +44,19 @@ final class ClipboardService: ClipboardServicing {
                 throw ClipboardError.encodingFailed
             }
 
+            return encodedPNG as Data
+        }
+    }
+}
+
+/// Only the eager pasteboard publication touches AppKit. No retained payload.
+@MainActor
+final class ClipboardService: ClipboardServicing {
+    func publishPNG(_ data: Data) throws {
+        try autoreleasepool {
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            guard pasteboard.setData(encodedPNG as Data, forType: .png) else {
+            guard pasteboard.setData(data, forType: .png) else {
                 throw ClipboardError.pasteboardWriteFailed
             }
         }

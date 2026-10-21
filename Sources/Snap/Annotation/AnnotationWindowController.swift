@@ -3,8 +3,8 @@ import CoreGraphics
 
 /// Owns the borderless annotation window, its canvas, and its toolbar for
 /// one session. `Enter`, `Cmd+C`, and the done button all close the editor
-/// and publish the final annotated image; `Esc` closes the same way
-/// without rolling the clipboard back.
+/// and publish the final annotated image; `Esc` cancels pending work without
+/// rolling the clipboard back.
 @MainActor
 final class AnnotationWindowController {
     let document: AnnotationDocument
@@ -13,6 +13,8 @@ final class AnnotationWindowController {
     private(set) var canvasView: AnnotationCanvasView?
     private var toolbar: AnnotationToolbarView?
     private var isFinishing = false
+    private let clipboardFailure = ClipboardFailureController()
+    private(set) var clipboardError: Error?
     private var undoObservers: [NSObjectProtocol] = []
 
     private var onFinished: (() -> Void)?
@@ -20,11 +22,25 @@ final class AnnotationWindowController {
     init(
         baseImage: CGImage,
         clipboardService: ClipboardServicing,
+        encode: @escaping AnnotationRenderPipeline.EncodeFunction = { try PNGEncoder.encode($0) },
         onFinished: @escaping () -> Void
     ) {
         self.document = AnnotationDocument(baseImage: baseImage)
-        self.pipeline = AnnotationRenderPipeline(clipboardService: clipboardService)
+        self.pipeline = AnnotationRenderPipeline(clipboardService: clipboardService, encode: encode)
         self.onFinished = onFinished
+        pipeline.onPublished = { [weak self] in
+            guard let self else { return }
+            self.clearClipboardError()
+            if self.isFinishing { self.completeFinish() }
+        }
+        pipeline.onRenderFailed = { [weak self] error in
+            guard let self, self.window != nil else { return }
+            self.clipboardError = error
+            if !self.isFinishing { self.window?.makeKeyAndOrderFront(nil) }
+            self.clipboardFailure.show(error,
+                retry: { [weak self] in self?.retryClipboard() },
+                close: { [weak self] in self?.cancel() })
+        }
         SessionLifetime.retain(.editorController)
     }
 
@@ -63,7 +79,7 @@ final class AnnotationWindowController {
         canvasView.onEditingStateChanged = { [weak self] in self?.updateToolbarState() }
         canvasView.onUndo = { [weak self] in self?.undo() }
         canvasView.onFinish = { [weak self] in self?.finish() }
-        canvasView.onCancel = { [weak self] in self?.finish() }
+        canvasView.onCancel = { [weak self] in self?.cancel() }
         canvasView.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
 
         let toolbar = AnnotationToolbarView(frame: layout.toolbarFrame)
@@ -147,6 +163,7 @@ final class AnnotationWindowController {
     }
 
     private func publishEdit() {
+        clearClipboardError()
         canvasView?.setAnnotations(document.entries)
         updateToolbarState()
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
@@ -154,6 +171,7 @@ final class AnnotationWindowController {
 
     private func commitText(_ session: TextEditingSession) {
         guard session.commit(to: document) else { return }
+        clearClipboardError()
         canvasView?.setAnnotations(document.entries)
         updateToolbarState()
         if !isFinishing {
@@ -171,17 +189,19 @@ final class AnnotationWindowController {
         canvasView?.cancelGesture()
         restoreCanvasFocus()
         guard document.undo() else { return }
+        clearClipboardError()
         canvasView?.setAnnotations(document.entries)
         updateToolbarState()
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
-    /// `Enter`, `Cmd+C`, `Esc`, and the done button all land here. Hides the
+    /// `Enter`, `Cmd+C`, and the done button all land here. Hides the
     /// window immediately, commits active text, and waits for the final image
     /// publication before teardown, including when native Copy replaced it.
     func finish() {
         guard !isFinishing, window != nil else { return }
         isFinishing = true
+        clearClipboardError()
         toolbar?.stylePopover.close()
         canvasView?.cancelGesture()
         canvasView?.endTextEditing(commit: true)
@@ -189,20 +209,35 @@ final class AnnotationWindowController {
         // document changes. Always publish a fresh final snapshot on Done.
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
         window?.orderOut(nil)
-        let callback = onFinished
+    }
 
-        Task { [weak self] in
-            await self?.pipeline.awaitPendingRender()
-            guard let self else {
-                callback?()
-                return
-            }
-            self.tearDown()
-            callback?()
-        }
+    func retryClipboard() {
+        guard window != nil, clipboardError != nil else { return }
+        clearClipboardError()
+        pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
+        if isFinishing { window?.orderOut(nil) }
+    }
+
+    /// Escape/Close invalidate output immediately, including a pending Done.
+    func cancel() {
+        guard window != nil else { return }
+        isFinishing = true
+        completeFinish()
+    }
+
+    private func completeFinish() {
+        let callback = onFinished
+        tearDown()
+        callback?()
+    }
+
+    private func clearClipboardError() {
+        clipboardError = nil
+        clipboardFailure.close()
     }
 
     private func tearDown() {
+        clearClipboardError()
         for observer in undoObservers { NotificationCenter.default.removeObserver(observer) }
         undoObservers.removeAll()
         pipeline.invalidate()
