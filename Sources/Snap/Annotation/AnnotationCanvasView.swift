@@ -16,6 +16,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     }
     var textStyle = TextStyle()
     var onTextCommit: ((TextEditingSession) -> Void)?
+    var onEditingStateChanged: (() -> Void)?
     var onTextStyleChanged: ((TextStyle) -> Void)?
     private(set) var textSession: TextEditingSession?
     private(set) var textEditor: AnnotationTextView?
@@ -51,6 +52,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         self.baseImage = baseImage
         self.imagePixelSize = CGSize(width: baseImage.width, height: baseImage.height)
         super.init(frame: .zero)
+        clipsToBounds = true
         SessionLifetime.retain(.canvasView)
     }
 
@@ -80,6 +82,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         endTextEditing(commit: false)
         onTextCommit = nil
         onTextStyleChanged = nil
+        onEditingStateChanged = nil
         entries = []
         onCommit = nil
         onUpdate = nil
@@ -224,6 +227,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
 
         switch event.keyCode {
+        case 48: // Tab / Shift+Tab enter the toolbar's native key-view loop.
+            if event.modifierFlags.contains(.shift) { window?.selectPreviousKeyView(self) }
+            else { window?.selectNextKeyView(self) }
+            return
         case 53: // Esc
             if manipulation != nil || dragStart != nil {
                 cancelGesture()
@@ -305,10 +312,11 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         editor.onCommit = { [weak self] in self?.endTextEditing(commit: true) }
         editor.onCancel = { [weak self] in self?.endTextEditing(commit: false) }
         textEditor = editor
-        addSubview(editor, positioned: .below, relativeTo: subviews.first)
+        addSubview(editor)
         updateTextEditorAppearance()
         window?.makeFirstResponder(editor)
         editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+        onEditingStateChanged?()
         needsDisplay = true
     }
 
@@ -336,15 +344,15 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
-    func setTextStyle(_ style: TextStyle) {
+    func setTextStyle(_ style: TextStyle, restoreFocus: Bool = true) {
         textStyle = style
         if textSession != nil {
             var imageStyle = style
             imageStyle.fontSize /= max(imageToViewScale, 0.001)
             textSession?.draft.style = imageStyle
             updateTextEditorAppearance()
-            window?.makeFirstResponder(textEditor)
-        } else {
+            if restoreFocus { window?.makeFirstResponder(textEditor) }
+        } else if restoreFocus {
             window?.makeFirstResponder(self)
         }
     }
@@ -352,6 +360,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         guard let editor = textEditor else { return }
         textSession?.draft.text = editor.string
+        onEditingStateChanged?()
         layoutTextEditor()
         needsDisplay = true
     }
@@ -370,6 +379,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         textSession = nil
         needsDisplay = true
         if commit { onTextCommit?(session) }
+        onEditingStateChanged?()
     }
 
     private func updateTextEditorAppearance() {

@@ -19,9 +19,10 @@ The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately.
 - Freeze only the display containing the mouse, then let you drag a region.
 - Copy that crop to the clipboard immediately.
 - Annotate with a red arrow, a red outline rectangle, an opaque black privacy block, text/callouts, or numbered markers.
-- With Text selected, click to type or drag to set the wrapping width. Click existing text to edit it. The toolbar offers plain/callout, red/blue/green/yellow/black/white, and 14/18/24-point sizes. Defaults reset each capture.
+- With Text selected, click to type or drag to set the wrapping width. Click existing text to edit it. The Text style popover offers plain/callout, red/blue/green/yellow/black/white, and 14/18/24-point sizes. Defaults reset each capture.
 - With Number selected, click repeatedly to place markers starting at 1. Circles start at 28 display points and grow for longer labels. Moving markers preserves their order; deletion closes gaps.
 - With Select selected, click text or a marker to select it, drag to move, and press Delete to remove it. Drag the right-side text handle to change wrapping width; double-click selected text to edit. Each completed gesture is one undo step. Selection outlines and handles never appear in clipboard images.
+- Keep the compact toolbar above the image, with surrounding space for tiny crops. Arrow is selected initially. Text style is available while Text is selected or an existing text annotation is being edited. Tab/Shift+Tab navigates the toolbar; Undo reflects the active text or document history. Editor chrome never appears in exports.
 - Recopy the clipboard after every completed annotation.
 - Close with `Enter`. Cancel selection with `Esc`. Undo with `Cmd+Z`.
 

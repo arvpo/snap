@@ -68,6 +68,7 @@ private func runAllTests() async -> Int32 {
     registerAnnotationTextEditingTests()
     registerAnnotationSelectionTests()
     registerAnnotationLayoutTests()
+    registerAnnotationToolbarTests()
     registerImageRendererTests()
     registerAnnotationRenderPipelineTests()
 

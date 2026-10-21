@@ -286,14 +286,16 @@ func registerAnnotationTextEditingTests() {
         controller.show()
         defer { controller.close() }
         let canvas = controller.canvasView!
-        let toolbar = canvas.subviews.compactMap { $0 as? AnnotationToolbarView }.first!
+        let toolbar = canvas.superview!.subviews.compactMap { $0 as? AnnotationToolbarView }.first!
         let textButton = toolbar.subviews.compactMap { $0 as? NSButton }.first { $0.toolTip == "Text  (T)" }!
         textButton.performClick(nil)
         try expectEqual(canvas.currentTool, .text)
-        try expectEqual(toolbar.frame.height, 78)
+        try expectEqual(toolbar.frame.height, 48)
         canvas.beginTextEditing(.new(from: CGPoint(x: 30, y: 220), to: .zero, style: TextStyle()))
         canvas.textEditor?.insertText("Styled", replacementRange: NSRange(location: NSNotFound, length: 0))
-        let controls = toolbar.subviews.compactMap { $0 as? NSPopUpButton }
+        toolbar.toggleStylePopover()
+        try expect(toolbar.stylePopover.isShown)
+        let controls = toolbar.stylePopover.contentViewController!.view.subviews.compactMap { $0 as? NSPopUpButton }
         for (title, expectedColor) in zip(["Red", "Blue", "Green", "Yellow", "Black", "White"], AnnotationColor.allCases) {
             let control = controls.first { $0.itemTitles.contains(title) }!
             control.selectItem(withTitle: title)
@@ -307,13 +309,14 @@ func registerAnnotationTextEditingTests() {
         }
         try expectEqual(canvas.textSession?.draft.style.presentation, .callout)
         try expectEqual(canvas.textEditor?.font?.pointSize, 24)
+        toolbar.stylePopover.performClose(nil)
         try expect(canvas.window?.firstResponder === canvas.textEditor)
         try expect(controller.document.isEmpty)
         controller.selectTool(.arrow)
         try expect(canvas.textEditor == nil)
         try expectEqual(controller.document.entries.count, 1)
-        try expectEqual(toolbar.frame.height, 44)
-        try expect(controls.allSatisfy(\.isHidden))
+        try expectEqual(toolbar.frame.height, 48)
+        try expect(!toolbar.stylePopover.isShown)
     }
 
     test("Done accepts an uncommitted draft and native editor resources are released") {

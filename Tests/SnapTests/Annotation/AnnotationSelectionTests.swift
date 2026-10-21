@@ -315,7 +315,7 @@ func registerAnnotationSelectionTests() {
         controller.show()
         defer { controller.close() }
         let canvas = controller.canvasView!
-        let toolbar = canvas.subviews.compactMap { $0 as? AnnotationToolbarView }.first!
+        let toolbar = canvas.superview!.subviews.compactMap { $0 as? AnnotationToolbarView }.first!
         canvas.beginTextEditing(.new(from: CGPoint(x: 40, y: 180), to: CGPoint(x: 40, y: 180), style: TextStyle()))
         canvas.textEditor?.insertText("Keep", replacementRange: NSRange(location: NSNotFound, length: 0))
         for (label, tool) in [("Number  (N)", AnnotationTool.number), ("Select  (V)", .select)] {

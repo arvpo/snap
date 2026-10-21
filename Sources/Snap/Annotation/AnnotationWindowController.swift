@@ -13,6 +13,7 @@ final class AnnotationWindowController {
     private(set) var canvasView: AnnotationCanvasView?
     private var toolbar: AnnotationToolbarView?
     private var isFinishing = false
+    private var undoObservers: [NSObjectProtocol] = []
 
     private var onFinished: (() -> Void)?
 
@@ -35,10 +36,18 @@ final class AnnotationWindowController {
         guard window == nil else { return }
 
         let pixelSize = CGSize(width: document.baseImage.width, height: document.baseImage.height)
-        let windowFrame = Self.windowFrame(forImagePixelSize: pixelSize)
+        let screen = NSScreen.main
+        let layout = AnnotationEditorLayout(imagePixelSize: pixelSize,
+            visibleFrame: screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1024, height: 768),
+            backingScale: screen?.backingScaleFactor ?? 1)
+        let windowFrame = layout.windowFrame
+        let chrome = NSView(frame: CGRect(origin: .zero, size: windowFrame.size))
+        chrome.wantsLayer = true
+        chrome.layer?.backgroundColor = NSColor(white: 0.09, alpha: 1).cgColor
 
         let canvasView = AnnotationCanvasView(baseImage: document.baseImage)
-        canvasView.frame = CGRect(origin: .zero, size: windowFrame.size)
+        canvasView.frame = layout.canvasFrame
+        chrome.addSubview(canvasView)
         canvasView.currentTool = document.currentTool
         canvasView.onCommit = { [weak self] value in self?.commit(value) }
         canvasView.onUpdate = { [weak self] id, value in
@@ -51,27 +60,21 @@ final class AnnotationWindowController {
         }
         canvasView.onTextCommit = { [weak self] session in self?.commitText(session) }
         canvasView.onTextStyleChanged = { [weak self] style in self?.toolbar?.setTextStyle(style) }
+        canvasView.onEditingStateChanged = { [weak self] in self?.updateToolbarState() }
         canvasView.onUndo = { [weak self] in self?.undo() }
         canvasView.onFinish = { [weak self] in self?.finish() }
         canvasView.onCancel = { [weak self] in self?.finish() }
         canvasView.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
 
-        let toolbarSize = CGSize(width: 278, height: 44)
-        let toolbar = AnnotationToolbarView(
-            frame: CGRect(
-                x: (windowFrame.width - toolbarSize.width) / 2,
-                y: 14,
-                width: toolbarSize.width,
-                height: toolbarSize.height
-            )
-        )
-        toolbar.autoresizingMask = [.minXMargin, .maxXMargin]
+        let toolbar = AnnotationToolbarView(frame: layout.toolbarFrame)
         toolbar.setSelectedTool(document.currentTool)
         toolbar.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
-        toolbar.onTextStyleChanged = { [weak self] style in self?.canvasView?.setTextStyle(style) }
+        toolbar.onTextStyleChanged = { [weak self] style in self?.canvasView?.setTextStyle(style, restoreFocus: false) }
         toolbar.onUndo = { [weak self] in self?.undo() }
         toolbar.onDone = { [weak self] in self?.finish() }
-        canvasView.addSubview(toolbar)
+        toolbar.onPopoverClosed = { [weak self] in self?.restoreCanvasFocus() }
+        toolbar.onKeyDown = { [weak canvasView] event in canvasView?.keyDown(with: event) }
+        chrome.addSubview(toolbar)
 
         let window = AnnotationWindow(
             contentRect: windowFrame,
@@ -90,14 +93,22 @@ final class AnnotationWindowController {
             .transient,
         ]
         window.isReleasedWhenClosed = false
-        window.contentView = canvasView
+        window.contentView = chrome
         window.setFrame(windowFrame, display: false)
-        window.center()
 
         self.canvasView = canvasView
         self.toolbar = toolbar
         self.window = window
 
+        for name in [Notification.Name.NSUndoManagerDidCloseUndoGroup,
+                     .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
+            undoObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateToolbarState() }
+            })
+        }
+        updateToolbarState()
+        window.autorecalculatesKeyViewLoop = false
+        toolbar.connectKeyViewLoop(to: canvasView)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(canvasView)
@@ -116,8 +127,18 @@ final class AnnotationWindowController {
         document.currentTool = tool
         canvasView?.currentTool = tool
         toolbar?.setSelectedTool(tool)
-        toolbar?.setFrameSize(CGSize(width: 278, height: tool == .text ? 78 : 44))
+        updateToolbarState()
         window?.makeFirstResponder(canvasView)
+    }
+
+    private func restoreCanvasFocus() {
+        guard !isFinishing, let canvasView else { return }
+        window?.makeFirstResponder(canvasView.textEditor ?? canvasView)
+    }
+
+    private func updateToolbarState() {
+        toolbar?.setEditingText(canvasView?.textEditor != nil)
+        toolbar?.setCanUndo(canvasView?.textEditor?.undoManager?.canUndo ?? document.canUndo)
     }
 
     private func commit(_ value: AnnotationValue) {
@@ -127,12 +148,14 @@ final class AnnotationWindowController {
 
     private func publishEdit() {
         canvasView?.setAnnotations(document.entries)
+        updateToolbarState()
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
     private func commitText(_ session: TextEditingSession) {
         guard session.commit(to: document) else { return }
         canvasView?.setAnnotations(document.entries)
+        updateToolbarState()
         if !isFinishing {
             pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
         }
@@ -141,11 +164,15 @@ final class AnnotationWindowController {
     private func undo() {
         if let editor = canvasView?.textEditor {
             editor.undoManager?.undo()
+            updateToolbarState()
+            restoreCanvasFocus()
             return
         }
         canvasView?.cancelGesture()
+        restoreCanvasFocus()
         guard document.undo() else { return }
         canvasView?.setAnnotations(document.entries)
+        updateToolbarState()
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
@@ -155,6 +182,7 @@ final class AnnotationWindowController {
     func finish() {
         guard !isFinishing, window != nil else { return }
         isFinishing = true
+        toolbar?.stylePopover.close()
         canvasView?.cancelGesture()
         canvasView?.endTextEditing(commit: true)
         // Native Copy/Cut can replace the image with text even if there are no
@@ -175,6 +203,8 @@ final class AnnotationWindowController {
     }
 
     private func tearDown() {
+        for observer in undoObservers { NotificationCenter.default.removeObserver(observer) }
+        undoObservers.removeAll()
         pipeline.invalidate()
         canvasView?.releaseResources()
         toolbar?.releaseResources()
@@ -203,35 +233,6 @@ final class AnnotationWindowController {
         #endif
     }
 
-    private static func windowFrame(forImagePixelSize pixelSize: CGSize) -> CGRect {
-        guard let screen = NSScreen.main, pixelSize.width > 0, pixelSize.height > 0 else {
-            return CGRect(origin: .zero, size: pixelSize)
-        }
-
-        // `pixelSize` is in physical pixels; convert to points on this
-        // screen first so a Retina capture doesn't open at 2x its natural
-        // on-screen size before the 85%-of-screen fit is even applied.
-        let backingScale = max(screen.backingScaleFactor, 1)
-        let nativePointSize = CGSize(
-            width: pixelSize.width / backingScale,
-            height: pixelSize.height / backingScale
-        )
-
-        let maxSize = CGSize(
-            width: screen.visibleFrame.width * 0.85,
-            height: screen.visibleFrame.height * 0.85
-        )
-        let scale = min(1, min(maxSize.width / nativePointSize.width, maxSize.height / nativePointSize.height))
-        let size = CGSize(
-            width: (nativePointSize.width * scale).rounded(),
-            height: (nativePointSize.height * scale).rounded()
-        )
-        let origin = CGPoint(
-            x: screen.visibleFrame.midX - size.width / 2,
-            y: screen.visibleFrame.midY - size.height / 2
-        )
-        return CGRect(origin: origin, size: size)
-    }
 }
 
 private final class AnnotationWindow: NSWindow {
