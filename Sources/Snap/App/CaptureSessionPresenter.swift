@@ -55,14 +55,12 @@ struct CaptureSessionFactories {
 final class CaptureSessionPresenter {
     private let coordinator: CaptureCoordinator
     private let factories: CaptureSessionFactories
-    private let clipboardFailure = ClipboardFailureController()
 
     private(set) var overlay: OverlaySession?
     private(set) var editor: EditorSession?
 
     var onPermissionDenied: (() -> Void)?
     var onCaptureFailed: ((Error) -> Void)?
-    var onClipboardFailed: ((Error) -> Void)?
 
     init(coordinator: CaptureCoordinator, factories: CaptureSessionFactories) {
         self.coordinator = coordinator
@@ -70,17 +68,6 @@ final class CaptureSessionPresenter {
     }
 
     func bind() {
-        coordinator.onPreparingClipboard = { [weak self] in self?.dismissOverlay() }
-        coordinator.onClipboardFailed = { [weak self] error in
-            guard let self else { return }
-            if let onClipboardFailed = self.onClipboardFailed {
-                onClipboardFailed(error)
-            } else {
-                self.clipboardFailure.show(error,
-                    retry: { [weak self] in self?.coordinator.retryClipboard() },
-                    close: { [weak self] in self?.coordinator.cancel() })
-            }
-        }
         coordinator.onCapturedDisplay = { [weak self] capturedDisplay in
             self?.presentOverlay(capturedDisplay)
         }
@@ -105,7 +92,6 @@ final class CaptureSessionPresenter {
     }
 
     func dismissAll() {
-        clipboardFailure.close()
         dismissOverlay()
         dismissEditor()
     }
@@ -130,7 +116,6 @@ final class CaptureSessionPresenter {
     }
 
     private func presentEditor(_ image: CGImage) {
-        clipboardFailure.close()
         dismissOverlay()
         guard editor == nil else { return }
         let controller = factories.makeEditor(image) { [weak self] in

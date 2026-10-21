@@ -1,5 +1,7 @@
 # Phased plan: Snap annotation and speed upgrades
 
+> Clipboard behavior updated on 2026-10-22: capture selection and all edits stay local. Only `Cmd+C` outside native text editing or the tick (Done) button copies the final image. Return only commits active text. Earlier references below to immediate or per-edit clipboard updates describe the superseded design.
+
 ## Summary
 
 Deliver the upgrade in **six phases**, each producing a buildable, tested checkpoint and its own local Git commit.

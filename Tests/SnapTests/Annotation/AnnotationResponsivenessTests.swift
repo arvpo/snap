@@ -198,60 +198,41 @@ func registerAnnotationResponsivenessTests() {
         }
     }
 
-    test("initial clipboard preparation is guarded cancellable and rejects old sessions") {
-        let clipboard = ResponsiveClipboard()
-        let gate = WorkGate()
-        let coordinator = CaptureCoordinator(captureService: ResponsiveCapture(), clipboardService: clipboard,
-            encode: { image in
-                if image.width == 8 { await gate.pause() }
-                return try PNGEncoder.encode(image)
-            })
+    test("selection opens each editor immediately and ignores duplicate selections") {
+        let coordinator = CaptureCoordinator(captureService: ResponsiveCapture())
         var opened: [Int] = []
         coordinator.onSelectionCompleted = { opened.append($0.width) }
         try await beginSelection(coordinator)
         coordinator.selectionCompleted(with: makeTestCGImage())
-        await gate.waitForEntry()
-        let preparing = coordinator.state
+        try expectEqual(coordinator.state, .annotating)
         coordinator.handleCaptureRequest()
         coordinator.selectionCompleted(with: makeTestCGImage(width: 99))
         coordinator.cancel()
         try await beginSelection(coordinator)
         coordinator.selectionCompleted(with: makeTestCGImage(width: 12))
-        await gate.resume()
-        try await waitUntil { coordinator.state == .annotating }
-        try expectEqual(preparing, .preparingClipboard)
-        try expectEqual(clipboard.widths, [12])
-        try expectEqual(opened, [12])
+        try expectEqual(coordinator.state, .annotating)
+        try expectEqual(opened, [8, 12])
         try expect(coordinator.capturedDisplay == nil)
         coordinator.cancel()
         try expect(coordinator.selectedImage == nil)
     }
 
-    test("initial publication failure retains only the crop and Retry publishes it") {
+    test("editing with a failing clipboard stays local until explicit Done") {
         let clipboard = ResponsiveClipboard()
-        let gate = WorkGate()
-        let coordinator = CaptureCoordinator(captureService: ResponsiveCapture(), clipboardService: clipboard,
-            encode: { image in
-                await gate.pause()
-                return try PNGEncoder.encode(image)
-            })
         clipboard.fail = true
-        var failures = 0
-        coordinator.onClipboardFailed = { _ in failures += 1 }
-        try await beginSelection(coordinator)
-        coordinator.selectionCompleted(with: makeTestCGImage())
-        await gate.resume()
-        try await waitUntil { failures == 1 }
-        try expectEqual(coordinator.state, .preparingClipboard)
-        try expect(coordinator.capturedDisplay == nil && coordinator.selectedImage != nil)
-        clipboard.fail = false
-        coordinator.retryClipboard()
-        try await waitUntil { coordinator.state == .annotating }
-        try expectEqual(clipboard.widths, [8])
-        coordinator.cancel()
+        let controller = AnnotationWindowController(baseImage: makeTestCGImage(),
+            clipboardService: clipboard, onFinished: {})
+        controller.show()
+        defer { controller.close() }
+        controller.canvasView?.onCommit?(.number(NumberAnnotation(center: CGPoint(x: 3, y: 3))))
+        await pumpMainLoop()
+        try expect(controller.clipboardError == nil)
+        try expectEqual(clipboard.widths, [])
+        controller.finish()
+        try await waitUntil { controller.clipboardError != nil }
     }
 
-    test("text input and tool selection continue while encoding and Done waits for the newest draft") {
+    test("edits stay local and Done waits for the final draft to encode") {
         let clipboard = ResponsiveClipboard()
         let gate = WorkGate()
         var finished = 0
@@ -263,12 +244,14 @@ func registerAnnotationResponsivenessTests() {
         controller.show()
         let canvas = controller.canvasView!
         canvas.onCommit?(.number(NumberAnnotation(center: CGPoint(x: 30, y: 30))))
-        await gate.waitForEntry()
+        await pumpMainLoop()
+        try expectEqual(clipboard.widths, [])
         controller.selectTool(.text)
         canvas.beginTextEditing(.new(from: CGPoint(x: 40, y: 40), to: CGPoint(x: 40, y: 40), style: TextStyle()))
         canvas.textEditor?.insertText("Responsive 世界", replacementRange: NSRange(location: NSNotFound, length: 0))
         let typed = canvas.textEditor?.string
         controller.finish()
+        await gate.waitForEntry()
         let before = finished
         await gate.resume()
         try await waitUntil { finished == 1 }

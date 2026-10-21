@@ -23,10 +23,8 @@ func registerSessionLifetimeTests() {
         SessionLifetime.reset()
         CaptureSignposts.shared.reset()
         let service = LifetimeCaptureService()
-        let clipboard = LifetimeClipboardService()
         let coordinator = CaptureCoordinator(
-            captureService: service,
-            clipboardService: clipboard
+            captureService: service
         )
 
         for _ in 0..<50 {

@@ -91,10 +91,7 @@ func registerPerformanceProbeTests() {
 
     test("hotkey-to-snapshot signpost records a duration on a successful stub capture") {
         CaptureSignposts.shared.reset()
-        let coordinator = CaptureCoordinator(
-            captureService: SignpostCaptureService(),
-            clipboardService: SignpostClipboardService()
-        )
+        let coordinator = CaptureCoordinator(captureService: SignpostCaptureService())
         coordinator.handleCaptureRequest()
         try await waitUntil { coordinator.state == .selecting }
 
@@ -112,9 +109,4 @@ private final class SignpostCaptureService: ScreenCaptureServicing {
     func captureDisplayAtPointer() async throws -> CapturedDisplay {
         makeTestCapturedDisplay()
     }
-}
-
-@MainActor
-private final class SignpostClipboardService: ClipboardServicing {
-    func publishPNG(_ data: Data) throws {}
 }

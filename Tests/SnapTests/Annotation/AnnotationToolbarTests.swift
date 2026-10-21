@@ -88,8 +88,11 @@ func registerAnnotationToolbarTests() {
         }
         guard case .number(let marker) = controller.document.annotations.first else { throw ExpectationError(message: "missing marker", file: #fileID, line: #line) }
         try expectEqual(marker.center, CGPoint(x: 60, y: 40))
-        try await waitUntil { clipboard.images.count == 1 }
+        await pumpMainLoop()
+        try expect(clipboard.images.isEmpty)
         let expected = try ImageRenderer.render(baseImage: controller.document.baseImage, annotations: controller.document.annotations)
+        button("Done", in: tools).performClick(nil)
+        try await waitUntil { clipboard.images.count == 1 }
         try expectEqual(clipboard.images[0].width, 120)
         try expectEqual(clipboard.images[0].height, 80)
         try expectEqual(clipboard.images[0].dataProvider!.data! as Data, expected.dataProvider!.data! as Data)

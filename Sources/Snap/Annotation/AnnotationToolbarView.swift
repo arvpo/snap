@@ -50,7 +50,7 @@ final class AnnotationToolbarView: NSView, NSPopoverDelegate {
             self?.toggleStylePopover()
         }
         undoButton = addButton(symbol: "arrow.uturn.backward", label: "Undo", tooltip: "Undo  (⌘Z)") { [weak self] in self?.onUndo?() }
-        _ = addButton(symbol: "checkmark", label: "Done", tooltip: "Done  (Enter)") { [weak self] in self?.onDone?() }
+        _ = addButton(symbol: "checkmark", label: "Done", tooltip: "Copy image and close  (⌘C)") { [weak self] in self?.onDone?() }
 
         let content = NSView(frame: CGRect(x: 0, y: 0, width: 248, height: 152))
         presentation.addItems(withTitles: ["Plain", "Callout"])

@@ -2,9 +2,8 @@ import AppKit
 import CoreGraphics
 
 /// Owns the borderless annotation window, its canvas, and its toolbar for
-/// one session. `Enter`, `Cmd+C`, and the done button all close the editor
-/// and publish the final annotated image; `Esc` cancels pending work without
-/// rolling the clipboard back.
+/// one session. Only `Cmd+C` and the done button publish the final annotated
+/// image and close the editor; selection and edits leave the clipboard alone.
 @MainActor
 final class AnnotationWindowController {
     let document: AnnotationDocument
@@ -68,11 +67,11 @@ final class AnnotationWindowController {
         canvasView.onCommit = { [weak self] value in self?.commit(value) }
         canvasView.onUpdate = { [weak self] id, value in
             guard let self, self.document.update(id: id, value: value) else { return }
-            self.publishEdit()
+            self.refreshDocument()
         }
         canvasView.onDelete = { [weak self] id in
             guard let self, self.document.delete(id: id) else { return }
-            self.publishEdit()
+            self.refreshDocument()
         }
         canvasView.onTextCommit = { [weak self] session in self?.commitText(session) }
         canvasView.onTextStyleChanged = { [weak self] style in self?.toolbar?.setTextStyle(style) }
@@ -159,24 +158,17 @@ final class AnnotationWindowController {
 
     private func commit(_ value: AnnotationValue) {
         document.commit(value)
-        publishEdit()
+        refreshDocument()
     }
 
-    private func publishEdit() {
-        clearClipboardError()
+    private func refreshDocument() {
         canvasView?.setAnnotations(document.entries)
         updateToolbarState()
-        pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
 
     private func commitText(_ session: TextEditingSession) {
         guard session.commit(to: document) else { return }
-        clearClipboardError()
-        canvasView?.setAnnotations(document.entries)
-        updateToolbarState()
-        if !isFinishing {
-            pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
-        }
+        refreshDocument()
     }
 
     private func undo() {
@@ -189,13 +181,10 @@ final class AnnotationWindowController {
         canvasView?.cancelGesture()
         restoreCanvasFocus()
         guard document.undo() else { return }
-        clearClipboardError()
-        canvasView?.setAnnotations(document.entries)
-        updateToolbarState()
-        pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
+        refreshDocument()
     }
 
-    /// `Enter`, `Cmd+C`, and the done button all land here. Hides the
+    /// `Cmd+C` and the done button land here. Hides the
     /// window immediately, commits active text, and waits for the final image
     /// publication before teardown, including when native Copy replaced it.
     func finish() {

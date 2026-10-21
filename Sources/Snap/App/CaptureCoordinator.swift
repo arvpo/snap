@@ -7,7 +7,6 @@ final class CaptureCoordinator {
         case requestingPermission
         case capturing
         case selecting
-        case preparingClipboard
         case annotating
     }
 
@@ -15,7 +14,6 @@ final class CaptureCoordinator {
     private(set) var capturedDisplay: CapturedDisplay?
     private(set) var selectedImage: CGImage?
     private let captureService: ScreenCaptureServicing
-    private let clipboardPipeline: AnnotationRenderPipeline
     private var captureTask: Task<Void, Never>?
     private var sessionToken: CaptureSessionToken?
 
@@ -28,31 +26,14 @@ final class CaptureCoordinator {
     /// Fired only after ScreenCaptureKit has produced the pointer display snapshot.
     var onCapturedDisplay: ((CapturedDisplay) -> Void)?
 
-    /// Fired after the crop is on the clipboard and the editor should open.
+    /// Fired when the crop is ready to edit. Selection never writes the clipboard.
     var onSelectionCompleted: ((CGImage) -> Void)?
 
     var onPermissionDenied: (() -> Void)?
     var onCaptureFailed: ((Error) -> Void)?
-    var onClipboardFailed: ((Error) -> Void)?
-    var onPreparingClipboard: (() -> Void)?
 
-    init(
-        captureService: ScreenCaptureServicing = ScreenCaptureService(),
-        clipboardService: ClipboardServicing = ClipboardService(),
-        encode: @escaping AnnotationRenderPipeline.EncodeFunction = { try PNGEncoder.encode($0) }
-    ) {
+    init(captureService: ScreenCaptureServicing = ScreenCaptureService()) {
         self.captureService = captureService
-        self.clipboardPipeline = AnnotationRenderPipeline(clipboardService: clipboardService,
-            interval: .mouseUpToFirstClipboard, encode: encode)
-        clipboardPipeline.onPublished = { [weak self] in
-            guard let self, self.state == .preparingClipboard, let image = self.selectedImage else { return }
-            self.state = .annotating
-            self.onSelectionCompleted?(image)
-        }
-        clipboardPipeline.onRenderFailed = { [weak self] error in
-            guard let self, self.state == .preparingClipboard else { return }
-            self.onClipboardFailed?(error)
-        }
     }
 
     /// Menu and hotkey both enter here. Requests outside idle are ignored.
@@ -125,15 +106,8 @@ final class CaptureCoordinator {
         guard state == .selecting else { return }
         capturedDisplay = nil
         selectedImage = image
-        state = .preparingClipboard
-        onPreparingClipboard?()
-        guard state == .preparingClipboard, selectedImage === image else { return }
-        clipboardPipeline.scheduleRender(baseImage: image, annotations: [], startInterval: false)
-    }
-
-    func retryClipboard() {
-        guard state == .preparingClipboard, let selectedImage else { return }
-        clipboardPipeline.scheduleRender(baseImage: selectedImage, annotations: [])
+        state = .annotating
+        onSelectionCompleted?(image)
     }
 
     func finish() {
@@ -159,7 +133,6 @@ final class CaptureCoordinator {
     }
 
     private func leaveSession() {
-        clipboardPipeline.invalidate()
         captureTask?.cancel()
         captureTask = nil
         capturedDisplay = nil

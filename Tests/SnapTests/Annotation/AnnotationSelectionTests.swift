@@ -330,7 +330,7 @@ func registerAnnotationSelectionTests() {
         try expect(toolbar.subviews.compactMap { $0 as? NSButton }.allSatisfy { toolbar.bounds.contains($0.frame) })
     }
 
-    test("controller publishes only completed manipulation and export excludes selection handles") {
+    test("manipulation stays local until Done and export excludes selection handles") {
         let clipboard = SelectionClipboard()
         let base = makeTestCGImage(width: 900, height: 600)
         let controller = AnnotationWindowController(baseImage: base, clipboardService: clipboard, onFinished: {})
@@ -339,7 +339,8 @@ func registerAnnotationSelectionTests() {
         let canvas = controller.canvasView!
         let text = TextAnnotation(origin: CGPoint(x: 80, y: 200), text: "Selection", width: 200)
         canvas.onCommit?(.text(text))
-        try await waitUntil { clipboard.images.count == 1 }
+        await pumpMainLoop()
+        try expect(clipboard.images.isEmpty)
         controller.selectTool(.select)
         @MainActor func event(_ type: NSEvent.EventType, _ point: CGPoint) -> NSEvent {
             let local = CGPoint(x: point.x * canvas.imageToViewScale, y: point.y * canvas.imageToViewScale)
@@ -349,11 +350,14 @@ func registerAnnotationSelectionTests() {
         canvas.mouseDown(with: event(.leftMouseDown, CGPoint(x: 90, y: 210)))
         canvas.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: 150, y: 260)))
         await pumpMainLoop(2)
-        try expectEqual(clipboard.images.count, 1)
+        try expect(clipboard.images.isEmpty)
         canvas.mouseUp(with: event(.leftMouseUp, CGPoint(x: 150, y: 260)))
-        try await waitUntil { clipboard.images.count == 2 }
+        await pumpMainLoop()
+        try expect(clipboard.images.isEmpty)
         try expect(canvas.selectedAnnotationID != nil)
         let expected = try ImageRenderer.render(baseImage: base, annotations: controller.document.annotations)
+        controller.finish()
+        try await waitUntil { clipboard.images.count == 1 }
         try expectEqual(clipboard.images.last!.dataProvider!.data! as Data, expected.dataProvider!.data! as Data)
         try expectEqual(clipboard.images.last!.width, 900)
         try expectEqual(clipboard.images.last!.height, 600)

@@ -206,7 +206,7 @@ func registerAnnotationTextEditingTests() {
         try expectEqual(textCanvas().textStyle, TextStyle())
     }
 
-    test("typing and cancel do not publish while a committed text edit publishes once") {
+    test("typing cancel and committed text edits never publish automatically") {
         let clipboard = TextClipboard()
         let controller = AnnotationWindowController(baseImage: makeTestCGImage(width: 600, height: 400),
                                                     clipboardService: clipboard, onFinished: {})
@@ -222,11 +222,12 @@ func registerAnnotationTextEditingTests() {
         canvas.beginTextEditing(.new(from: CGPoint(x: 30, y: 120), to: .zero, style: TextStyle()))
         canvas.textEditor?.insertText("committed", replacementRange: NSRange(location: NSNotFound, length: 0))
         canvas.endTextEditing(commit: true)
-        try await waitUntil { clipboard.images.count == 1 }
+        await pumpMainLoop()
+        try expect(clipboard.images.isEmpty)
         try expectEqual(controller.document.entries.count, 1)
     }
 
-    test("Done commits active text and republishes the final image after native text copy") {
+    test("Done commits active text and publishes the final image after native text copy") {
         let clipboard = TextClipboard()
         var finished = false
         let base = makeTestCGImage(width: 600, height: 400)
@@ -238,7 +239,8 @@ func registerAnnotationTextEditingTests() {
         canvas.textEditor?.insertText("Copied 日本語", replacementRange: NSRange(location: NSNotFound, length: 0))
         let draft = canvas.textSession!.draft
         canvas.endTextEditing(commit: true)
-        try await waitUntil { clipboard.images.count == 1 }
+        await pumpMainLoop()
+        try expect(clipboard.images.isEmpty)
         let id = controller.document.entries[0].id
         canvas.beginTextEditing(TextEditingSession(annotationID: id, draft: draft))
         let pasteboard = NSPasteboard.withUniqueName()
@@ -251,7 +253,7 @@ func registerAnnotationTextEditingTests() {
         // No further text changes: Done still has to restore the image.
         controller.finish()
         try await waitUntil { finished }
-        try expectEqual(clipboard.images.count, 2)
+        try expectEqual(clipboard.images.count, 1)
         let expected = try ImageRenderer.render(baseImage: base, annotations: [.text(draft)])
         try expectEqual(clipboard.images.last!.dataProvider!.data! as Data, expected.dataProvider!.data! as Data)
         try expect(canvas.textEditor == nil)

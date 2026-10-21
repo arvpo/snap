@@ -95,8 +95,6 @@ final class SelectionOverlayController {
         isFinishing = true
         window?.orderOut(nil)
 
-        CaptureSignposts.shared.begin(.mouseUpToFirstClipboard)
-
         do {
             let croppedImage = try SelectionCropper.deepCopy(
                 capturedDisplay.image,
@@ -106,7 +104,6 @@ final class SelectionOverlayController {
             tearDown()
             callback?(croppedImage)
         } catch {
-            CaptureSignposts.shared.abandon(.mouseUpToFirstClipboard)
             let callback = onFailure
             tearDown()
             callback?(error)

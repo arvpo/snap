@@ -17,7 +17,7 @@ public enum SnapApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let clipboardService = ClipboardService()
-    private lazy var coordinator = CaptureCoordinator(clipboardService: clipboardService)
+    private let coordinator = CaptureCoordinator()
     private var presenter: CaptureSessionPresenter?
     private var statusItem: NSStatusItem?
     private var hotKey: GlobalHotKey?

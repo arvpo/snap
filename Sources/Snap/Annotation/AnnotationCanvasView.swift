@@ -279,8 +279,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
                 onUndo?()
                 return
             case "c":
-                // Same action as Enter/the done button: keep the latest
-                // clipboard image and close the editor.
+                // Explicitly copy the final image and close, like the tick button.
                 onFinish?()
                 return
             default:
@@ -312,7 +311,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             }
             return
         case 36, 76: // Return, keypad Enter
-            onFinish?()
+            // Return commits native text only; it never copies the image.
             return
         default:
             break

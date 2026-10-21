@@ -57,38 +57,23 @@ private final class PresenterCaptureService: ScreenCaptureServicing {
 }
 
 @MainActor
-private final class PresenterClipboardService: ClipboardServicing {
-    var writeError: Error?
-    private(set) var writeCount = 0
-
-    func publishPNG(_ data: Data) throws {
-        if let writeError { throw writeError }
-        writeCount += 1
-    }
-}
-
-@MainActor
 private final class PresenterHarness {
     let service: PresenterCaptureService
-    let clipboard: PresenterClipboardService
     let coordinator: CaptureCoordinator
     let overlay: OverlayStub
     let editor: EditorStub
     let presenter: CaptureSessionPresenter
     private(set) var permissionDeniedCount = 0
     private(set) var captureFailedCount = 0
-    private(set) var clipboardFailedCount = 0
 
     private init(
         service: PresenterCaptureService,
-        clipboard: PresenterClipboardService,
         coordinator: CaptureCoordinator,
         overlay: OverlayStub,
         editor: EditorStub,
         presenter: CaptureSessionPresenter
     ) {
         self.service = service
-        self.clipboard = clipboard
         self.coordinator = coordinator
         self.overlay = overlay
         self.editor = editor
@@ -102,10 +87,8 @@ private final class PresenterHarness {
         let service = PresenterCaptureService()
         service.hasAccess = hasAccess
         service.requestResult = requestResult
-        let clipboard = PresenterClipboardService()
         let coordinator = CaptureCoordinator(
-            captureService: service,
-            clipboardService: clipboard
+            captureService: service
         )
         let overlay = OverlayStub()
         let editor = EditorStub()
@@ -122,7 +105,6 @@ private final class PresenterHarness {
         )
         let harness = PresenterHarness(
             service: service,
-            clipboard: clipboard,
             coordinator: coordinator,
             overlay: overlay,
             editor: editor,
@@ -130,7 +112,6 @@ private final class PresenterHarness {
         )
         presenter.onPermissionDenied = { harness.permissionDeniedCount += 1 }
         presenter.onCaptureFailed = { _ in harness.captureFailedCount += 1 }
-        presenter.onClipboardFailed = { _ in harness.clipboardFailedCount += 1 }
         presenter.bind()
         return harness
     }
@@ -199,22 +180,15 @@ func registerCaptureSessionPresenterTests() {
         try expectEqual(harness.captureFailedCount, 1)
     }
 
-    test("clipboard write failure never opens the editor") {
+    test("selection dismisses the overlay and opens the editor immediately") {
         let harness = PresenterHarness.make()
-        harness.clipboard.writeError = ClipboardError.pasteboardWriteFailed
         harness.presenter.handleCaptureRequest()
         try await waitUntil { harness.coordinator.state == .selecting }
         harness.coordinator.selectionCompleted(with: makeTestCGImage())
-        try await waitUntil { harness.clipboardFailedCount == 1 }
-        try expectEqual(harness.coordinator.state, .preparingClipboard)
-        try expectEqual(harness.editor.showCount, 0)
-        try expect(harness.presenter.overlay == nil)
-        try expect(harness.presenter.editor == nil)
-        try expectEqual(harness.clipboardFailedCount, 1)
-        harness.clipboard.writeError = nil
-        harness.coordinator.retryClipboard()
-        try await waitUntil { harness.coordinator.state == .annotating }
+        try expectEqual(harness.coordinator.state, .annotating)
         try expectEqual(harness.editor.showCount, 1)
+        try expect(harness.presenter.overlay == nil)
+        try expect(harness.presenter.editor != nil)
         harness.coordinator.cancel()
     }
 

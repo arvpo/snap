@@ -1,33 +1,33 @@
 # Snap
 
-A small macOS screenshot tool. Press `Cmd+Shift+X`, drag a rectangle, annotate, and the image is already on the clipboard.
+A small macOS screenshot tool. Press `Cmd+Shift+X`, drag a rectangle, annotate, then press `Cmd+C` or the tick button to copy the image and close.
 
-It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captures only the monitor under the pointer, keeps one full-display buffer, copies the selected crop, then releases everything it can. After the editor closes it must retain no screenshot pixels. A leak or a rising memory line across repeated captures is a release-blocking bug.
+It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captures only the monitor under the pointer, keeps one full-display buffer, keeps the selected crop for editing, then releases everything it can. After the editor closes it must retain no screenshot pixels. A leak or a rising memory line across repeated captures is a release-blocking bug.
 
 ## Status
 
-Phases 1 through 5 of the original plan are implemented. Snap is a menu-bar app: global hotkey, pointer-display capture, region select, eager PNG clipboard, and an annotation editor. Automated tests cover mixed-display conversion, crop pixels, annotation geometry, undo, render-generation, coordinator transitions, presenter cancel/failure teardown, and 50-cycle session lifetime counters.
+Phases 1 through 5 of the original plan are implemented. Snap is a menu-bar app: global hotkey, pointer-display capture, region select, explicit PNG copying, and an annotation editor. Automated tests cover mixed-display conversion, crop pixels, annotation geometry, undo, render-generation, coordinator transitions, presenter cancel/failure teardown, and 50-cycle session lifetime counters.
 
 Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App Store release are a later phase.
 
 The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). Phase 3 adds repeated numbered-marker placement and selection, movement, deletion, and text-box width adjustment. Phase 4 moves the compact toolbar into editor chrome and adds contextual styling, keyboard focus, and accessibility. Phase 5 moves PNG encoding off the main actor, bounds background image work, redraws changed canvas regions, and provides retryable clipboard errors.
 
-The upgrade suite currently passes all **148 tests** through `scripts/test-appkit.sh`; debug/release builds and signed app packaging pass. Phase 6 adds complete scaled editing workflows, 50 synthetic capture/edit/close cycles, and 100-annotation performance probes. See the [phase 6 validation report](PHASE6_VALIDATION.md) for measurements, reproduction commands, and the live checks still blocking release acceptance.
+The suite, including explicit-copy clipboard regressions, currently passes all **151 tests** through `scripts/test-appkit.sh`; debug/release builds and signed app packaging pass. Phase 6 adds complete scaled editing workflows, 50 synthetic capture/edit/close cycles, and 100-annotation performance probes. See the [phase 6 validation report](PHASE6_VALIDATION.md) for measurements, reproduction commands, and the live checks still blocking release acceptance.
 
 ## What it does
 
 - Run as a menu-bar app with no Dock icon.
 - Start from `Cmd+Shift+X` or the menu-bar Capture item.
 - Freeze only the display containing the mouse, then let you drag a region.
-- Copy that crop to the clipboard immediately.
+- Open the selected crop in the editor without changing the clipboard.
 - Annotate with a red arrow, a red outline rectangle, an opaque black privacy block, text/callouts, or numbered markers.
 - With Text selected, click to type or drag to set the wrapping width. Click existing text to edit it. The Text style popover offers plain/callout, red/blue/green/yellow/black/white, and 14/18/24-point sizes. Defaults reset each capture.
 - With Number selected, click repeatedly to place markers starting at 1. Circles start at 28 display points and grow for longer labels. Moving markers preserves their order; deletion closes gaps.
 - With Select selected, click text or a marker to select it, drag to move, and press Delete to remove it. Drag the right-side text handle to change wrapping width; double-click selected text to edit. Each completed gesture is one undo step. Selection outlines and handles never appear in clipboard images.
 - Keep the compact toolbar above the image, with surrounding space for tiny crops. Arrow is selected initially. Text style is available while Text is selected or an existing text annotation is being edited. Tab/Shift+Tab navigates the toolbar; Undo reflects the active text or document history. Editor chrome never appears in exports.
-- Recopy the clipboard after completed edits. Rapid edits replace one pending snapshot while a single render/encode worker finishes; only the newest valid result is published. Typing and drag previews never encode PNGs.
+- Keep all edits local: drawing, text commits, style changes, moving, resizing, deleting, and undo never change the image clipboard. `Cmd+C` outside native text editing or the tick button copies the final image and closes the editor.
 - Retry a failed clipboard update, or choose Close to cancel the session. Done waits for successful publication; Escape invalidates pending output and keeps whatever is already on the clipboard.
-- `Enter` commits active text; outside text editing it finishes. Cancel selection with `Esc`. Undo with `Cmd+Z`.
+- `Enter` commits active text without copying; outside text editing it does nothing. Cancel selection with `Esc`. Undo with `Cmd+Z`.
 
 No file saving, history, upload, OCR, or preferences in the first version.
 
@@ -71,9 +71,9 @@ The 2026-10-21 display inventory reports the built-in display at 1470×956 point
 
 - Under 300 ms from hotkey to visible frozen overlay.
 - Under 100 ms from completed snapshot to overlay.
-- Under 50 ms from mouse-up to clipboard refresh for an ordinary region.
+- Under 50 ms from an explicit copy request to clipboard publication for an ordinary region.
 
-Instruments: attach Snap and filter `com.stradeon.Snap` / `latency`. The overall intervals are `hotkey-to-snapshot`, `snapshot-to-overlay`, `mouse-up-to-first-clipboard`, and `annotation-mouse-up-to-clipboard`. Separate `annotation-render`, `png-encode`, and `clipboard-publication` intervals distinguish background image work from main-actor pasteboard publication.
+Instruments: attach Snap and filter `com.stradeon.Snap` / `latency`. The overall intervals are `hotkey-to-snapshot`, `snapshot-to-overlay`, and `annotation-mouse-up-to-clipboard` (the existing name now measures an explicit copy request). Separate `annotation-render`, `png-encode`, and `clipboard-publication` intervals distinguish background image work from main-actor pasteboard publication.
 
 ## Build
 
@@ -111,12 +111,12 @@ Do not use `xcodebuild` for this project.
 | `Cmd+Z` | Undo text while editing; otherwise undo a completed annotation edit |
 | `Cmd+C` | Copy selected text while editing; otherwise publish the image and close |
 | `Delete` / forward Delete | Remove selected text or marker; remaining markers renumber automatically |
-| `Enter` / keypad Enter | Commit active text; otherwise finish and publish the image |
+| `Enter` / keypad Enter | Commit active text without copying; no action outside text editing |
 | `Shift+Enter` | Add a newline while editing text |
 | `Esc` | Cancel active text/gesture, then clear annotation selection; otherwise cancel capture selection or close the editor |
 | `Tab` / `Shift+Tab` | Move through toolbar controls outside native text editing |
 
-Done commits active text and republishes the final image, including after text Copy/Cut. If publication fails, Retry completes Done after a successful write; Close cancels. Escape closes without waiting for a pending image write or restoring a clipboard image replaced by native text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
+The tick (Done) commits active text and copies the final image, including after text Copy/Cut. If publication fails, Retry completes Done after a successful write; Close cancels. Escape closes without waiting for a pending image write or restoring a clipboard image replaced by native text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
 
 The toolbar and small-crop chrome are implemented. Live input-method candidate windows, VoiceOver, popover placement, and mixed-display text sizing still need manual validation.
 

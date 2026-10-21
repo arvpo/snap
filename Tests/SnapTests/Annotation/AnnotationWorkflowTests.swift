@@ -123,6 +123,60 @@ private func editWorkflow(_ editor: AnnotationWindowController) throws -> [Annot
 
 @MainActor
 func registerAnnotationWorkflowTests() {
+    for action in ["cancel", "command-c", "tick"] {
+        test("clipboard stays unchanged through capture and edits until explicit \(action)") {
+            let clipboard = WorkflowClipboard()
+            defer { clipboard.pasteboard.releaseGlobally() }
+            clipboard.pasteboard.clearContents()
+            try expect(clipboard.pasteboard.setString("Keep my clipboard", forType: .string))
+            let changeCount = clipboard.pasteboard.changeCount
+            let coordinator = CaptureCoordinator(captureService: WorkflowCapture())
+            let presenter = CaptureSessionPresenter(coordinator: coordinator, factories: .live(clipboardService: clipboard))
+            presenter.bind()
+            defer { coordinator.cancel(); presenter.dismissAll() }
+            presenter.handleCaptureRequest()
+            try await waitUntil { coordinator.state == .selecting }
+            let base = makeTestCGImage(width: 800, height: 640)
+            coordinator.selectionCompleted(with: base)
+            try expectEqual(coordinator.state, .annotating)
+            let editor = presenter.editor as! AnnotationWindowController
+            let expected = try editWorkflow(editor)
+            editor.canvasView?.endTextEditing(commit: true)
+            for code: UInt16 in [36, 76] {
+                editor.canvasView?.keyDown(with: workflowKey(code, "\r"))
+            }
+            await pumpMainLoop(20)
+            try expectEqual(clipboard.writes, 0)
+            try expectEqual(clipboard.pasteboard.changeCount, changeCount)
+            try expectEqual(clipboard.pasteboard.string(forType: .string), "Keep my clipboard")
+            try expectEqual(coordinator.state, .annotating)
+            switch action {
+            case "command-c":
+                editor.canvasView?.keyDown(with: workflowKey(8, "c", flags: .command))
+            case "tick":
+                let toolbar = editor.canvasView?.superview?.subviews.compactMap { $0 as? AnnotationToolbarView }.first
+                let done = toolbar?.subviews.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "Done" }
+                try expect(done != nil)
+                done?.performClick(nil)
+            default:
+                // Clear any annotation selection before Escape closes the editor.
+                editor.selectTool(.arrow)
+                editor.canvasView?.keyDown(with: workflowKey(53, "\u{1b}"))
+            }
+            try await waitUntil { coordinator.state == .idle }
+            if action == "cancel" {
+                try expectEqual(clipboard.writes, 0)
+                try expectEqual(clipboard.pasteboard.changeCount, changeCount)
+                try expectEqual(clipboard.pasteboard.string(forType: .string), "Keep my clipboard")
+            } else {
+                try expectEqual(clipboard.writes, 1)
+                let image = try decodedClipboardImage(clipboard.pasteboard.data(forType: .png)!)
+                let rendered = try ImageRenderer.render(baseImage: base, annotations: expected)
+                try expectEqual(image.dataProvider!.data! as Data, rendered.dataProvider!.data! as Data)
+            }
+        }
+    }
+
     for scale: CGFloat in [1, 0.5, 0.25] {
         test("phase6 complete text/marker workflow exports final pixels at scale \(scale)") {
             let clipboard = WorkflowClipboard()
@@ -177,7 +231,7 @@ func registerAnnotationWorkflowTests() {
 private func repeatWorkflow(capture: ScreenCaptureServicing, cycles: Int) async throws {
     let clipboard = WorkflowClipboard()
     defer { clipboard.pasteboard.releaseGlobally() }
-    let coordinator = CaptureCoordinator(captureService: capture, clipboardService: clipboard)
+    let coordinator = CaptureCoordinator(captureService: capture)
     let presenter = CaptureSessionPresenter(coordinator: coordinator, factories: .live(clipboardService: clipboard))
     presenter.bind()
     defer { coordinator.cancel(); presenter.dismissAll() }
@@ -206,7 +260,9 @@ private func repeatWorkflow(capture: ScreenCaptureServicing, cycles: Int) async 
             coordinator.selectionCompleted(with: crop)
         }
         try await waitUntil(timeout: .seconds(5)) { coordinator.state == .annotating }
-        try expect(fullDisplay == nil, "crop or overlay retained the full display")
+        // Opening the editor is now synchronous. Give AppKit's autorelease
+        // pool a turn to drain the dismissed overlay's temporary image refs.
+        try await waitUntil(timeout: .seconds(2)) { fullDisplay == nil }
         try expect(presenter.overlay == nil)
         do {
             let editor = presenter.editor as! AnnotationWindowController

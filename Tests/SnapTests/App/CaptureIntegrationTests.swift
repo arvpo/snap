@@ -24,17 +24,6 @@ private final class IntegrationCaptureService: ScreenCaptureServicing {
 }
 
 @MainActor
-private final class IntegrationClipboardService: ClipboardServicing {
-    private(set) var writeCount = 0
-    private(set) var lastImage: CGImage?
-
-    func publishPNG(_ data: Data) throws {
-        writeCount += 1
-        lastImage = try decodedClipboardImage(data)
-    }
-}
-
-@MainActor
 func registerCaptureIntegrationTests() {
     test("hotkey-to-capture seam starts exactly one snapshot from idle") {
         let service = IntegrationCaptureService()
@@ -65,12 +54,10 @@ func registerCaptureIntegrationTests() {
         try expectEqual(coordinator.state, .selecting)
     }
 
-    test("selection-to-editor seam writes the clipboard and enters annotating") {
+    test("selection-to-editor seam immediately enters annotating") {
         let service = IntegrationCaptureService()
-        let clipboard = IntegrationClipboardService()
         let coordinator = CaptureCoordinator(
-            captureService: service,
-            clipboardService: clipboard
+            captureService: service
         )
         var editorImage: CGImage?
         coordinator.onSelectionCompleted = { editorImage = $0 }
@@ -82,7 +69,6 @@ func registerCaptureIntegrationTests() {
         try await waitUntil { coordinator.state == .annotating }
 
         try expectEqual(coordinator.state, .annotating)
-        try expectEqual(clipboard.writeCount, 1)
         try expect(editorImage === crop)
         try expect(coordinator.capturedDisplay == nil)
         try expect(coordinator.selectedImage === crop)
@@ -90,10 +76,8 @@ func registerCaptureIntegrationTests() {
 
     test("cancel from selecting leaves the clipboard untouched") {
         let service = IntegrationCaptureService()
-        let clipboard = IntegrationClipboardService()
         let coordinator = CaptureCoordinator(
-            captureService: service,
-            clipboardService: clipboard
+            captureService: service
         )
 
         coordinator.handleCaptureRequest()
@@ -101,7 +85,6 @@ func registerCaptureIntegrationTests() {
         coordinator.cancel()
 
         try expectEqual(coordinator.state, .idle)
-        try expectEqual(clipboard.writeCount, 0)
         try expect(coordinator.capturedDisplay == nil)
         try expect(coordinator.selectedImage == nil)
     }
@@ -140,10 +123,8 @@ func registerCaptureIntegrationTests() {
 
     test("a completed session releases capture images before the next request") {
         let service = IntegrationCaptureService()
-        let clipboard = IntegrationClipboardService()
         let coordinator = CaptureCoordinator(
-            captureService: service,
-            clipboardService: clipboard
+            captureService: service
         )
 
         coordinator.handleCaptureRequest()

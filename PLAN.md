@@ -1,5 +1,7 @@
 # Fast macOS Screenshot App
 
+> Clipboard behavior updated on 2026-10-22: capture selection and all edits stay local. Only `Cmd+C` outside native text editing or the tick (Done) button copies the final image. Return only commits active text. Earlier references below to immediate or per-edit clipboard updates describe the superseded design.
+
 For the next upgrade, see [Phased plan: Snap annotation and speed upgrades](ANNOTATION_UPGRADE_PLAN.md).
 
 Native, menu-bar-only macOS app in Swift/AppKit. `Cmd+Shift+X` opens a Flameshot-style region selector on the monitor containing the pointer. The selected image is copied immediately, then recopied whenever an annotation is completed.
