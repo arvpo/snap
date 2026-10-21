@@ -8,7 +8,7 @@ When execution is enabled, first save this plan as `ANNOTATION_UPGRADE_PLAN.md`,
 
 `docs: add phased annotation upgrade plan`
 
-The previously verified baseline is **73 passing tests**. The working tree is currently clean.
+The baseline before this upgrade was **73 passing tests**, with a clean working tree.
 
 ## Agreed behavior
 
@@ -121,4 +121,11 @@ The previously verified baseline is **73 passing tests**. The working tree is cu
 ## Commit discipline
 
 Complete phases in order. For each phase, review the diff, pass its automated checks, update its status in the saved plan, and commit the implementation and relevant tests together. Fix regressions before starting the next phase. Final release readiness additionally requires the manual performance and memory checks.
+
+## Progress
+
+- **Phase 1 complete (2026-10-21):** stable annotation entries; atomic insert/update/move/delete batches; value-only undo deltas including marker renumbering; Core Text measurement, bounds, and rendering for plain text, callouts, and expanding numbered markers.
+- **Verification:** all 90 tests pass (73 baseline plus 17 new tests). Coverage includes identity and ordering, grouped edits and undo, invalid/no-op transactions, renumbering through 9→10, Unicode/multiline/wrapped text, narrow frames, multi-digit marker bounds, palette contrast, image-edge clipping, off-main rendering, and preservation of shape pixels and privacy opacity. A rendered sample was visually inspected.
+- **Integration boundary:** existing tools continue using the shared renderer. New interaction controls belong to phases 2 and 3; phases 2–6 remain pending. Live capture/display/performance checks remain part of the later integration phase.
+- **Build:** release build passes. SwiftPM used temporary module/package caches and `--disable-sandbox` for this environment; release debug-symbol generation required access outside the enclosing filesystem sandbox. Existing Command Line Tools search-path warnings remain non-fatal.
 

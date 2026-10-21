@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreText
 import Foundation
 
 enum ImageRenderError: LocalizedError {
@@ -83,7 +84,59 @@ enum ImageRenderer {
             drawRectangleOutline(rectangle, in: context)
         case .privacyBlock(let block):
             drawPrivacyBlock(block, in: context)
+        case .text(let text):
+            drawText(text, in: context)
+        case .number(let number):
+            drawNumber(number, in: context)
         }
+    }
+
+    private static func drawText(_ annotation: TextAnnotation, in context: CGContext) {
+        guard let layout = AnnotationLayout.text(annotation) else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.setShouldAntialias(true)
+        if annotation.style.presentation == .callout {
+            context.setFillColor(annotation.style.color.cgColor)
+            let radius = max(1, layout.contentRect.minX - layout.backgroundRect.minX)
+            context.addPath(CGPath(roundedRect: layout.backgroundRect, cornerWidth: radius,
+                                   cornerHeight: radius, transform: nil))
+            context.fillPath()
+        }
+        // Core Text expects y-up coordinates; the shared renderer uses y-down.
+        context.translateBy(x: layout.contentRect.minX, y: layout.contentRect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        let oldTextMatrix = context.textMatrix
+        let oldTextPosition = context.textPosition
+        context.textMatrix = .identity
+        CTFrameDraw(layout.frame, context)
+        context.textMatrix = oldTextMatrix
+        context.textPosition = oldTextPosition
+    }
+
+    private static func drawNumber(_ annotation: NumberAnnotation, in context: CGContext) {
+        let layout = AnnotationLayout.number(annotation)
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.setShouldAntialias(true)
+        context.saveGState()
+        context.setShadow(offset: CGSize(width: 0, height: 1), blur: 2,
+                          color: CGColor(gray: 0, alpha: 0.3))
+        context.setFillColor(annotation.color.cgColor)
+        context.fillEllipse(in: layout.circleRect)
+        context.restoreGState()
+        context.setStrokeColor(CGColor(gray: 1, alpha: 1))
+        context.setLineWidth(2)
+        context.strokeEllipse(in: layout.circleRect.insetBy(dx: 1, dy: 1))
+        context.translateBy(x: layout.baseline.x, y: layout.baseline.y)
+        context.scaleBy(x: 1, y: -1)
+        let oldTextMatrix = context.textMatrix
+        let oldTextPosition = context.textPosition
+        context.textMatrix = .identity
+        context.textPosition = .zero
+        CTLineDraw(layout.line, context)
+        context.textMatrix = oldTextMatrix
+        context.textPosition = oldTextPosition
     }
 
     private static func drawArrow(_ arrow: ArrowAnnotation, in context: CGContext) {

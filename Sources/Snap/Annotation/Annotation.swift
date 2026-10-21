@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 enum AnnotationTool: CaseIterable, Sendable {
     case arrow
@@ -23,6 +24,76 @@ enum AnnotationValue: Equatable, Sendable {
     case arrow(ArrowAnnotation)
     case rectangle(RectangleAnnotation)
     case privacyBlock(PrivacyBlockAnnotation)
+    case text(TextAnnotation)
+    case number(NumberAnnotation)
+}
+
+/// Identity belongs to the document entry, so replacing geometry or style
+/// never changes the identity used by selection and editing.
+struct Annotation: Equatable, Identifiable, Sendable {
+    let id: UUID
+    var value: AnnotationValue
+
+    init(id: UUID = UUID(), value: AnnotationValue) {
+        self.id = id
+        self.value = value
+    }
+}
+
+enum AnnotationColor: CaseIterable, Sendable {
+    case red, blue, green, yellow, black, white
+}
+
+struct TextStyle: Equatable, Sendable {
+    enum Presentation: Sendable { case plain, callout }
+
+    var presentation: Presentation = .plain
+    var color: AnnotationColor = .red
+    /// Sizes and geometry are in image pixels. The UI converts point sizes
+    /// when creating an annotation, never while exporting it.
+    var fontSize: CGFloat = 18
+}
+
+struct TextAnnotation: Equatable, Sendable {
+    var origin: CGPoint
+    var text: String
+    /// Content width, excluding callout padding; nil means natural width.
+    var width: CGFloat? = nil
+    var style: TextStyle = TextStyle()
+}
+
+struct NumberAnnotation: Equatable, Sendable {
+    var center: CGPoint
+    var number: Int = 1
+    var color: AnnotationColor = .red
+    var diameter: CGFloat = 28
+    var fontSize: CGFloat = 18
+}
+
+extension AnnotationValue {
+    func translated(by offset: CGSize) -> AnnotationValue {
+        func move(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: point.x + offset.width, y: point.y + offset.height)
+        }
+        switch self {
+        case .arrow(var arrow):
+            arrow.start = move(arrow.start)
+            arrow.end = move(arrow.end)
+            return .arrow(arrow)
+        case .rectangle(var rectangle):
+            rectangle.rect = rectangle.rect.offsetBy(dx: offset.width, dy: offset.height)
+            return .rectangle(rectangle)
+        case .privacyBlock(var block):
+            block.rect = block.rect.offsetBy(dx: offset.width, dy: offset.height)
+            return .privacyBlock(block)
+        case .text(var text):
+            text.origin = move(text.origin)
+            return .text(text)
+        case .number(var number):
+            number.center = move(number.center)
+            return .number(number)
+        }
+    }
 }
 
 /// Builds annotation values from a drag in image-space coordinates (origin

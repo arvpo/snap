@@ -10,6 +10,8 @@ Phases 1 through 5 are implemented. Snap is a menu-bar app: global hotkey, point
 
 Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App Store release are a later phase.
 
+The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. The suite now has 90 passing tests. Text entry and marker placement controls arrive in phases 2 and 3.
+
 ## What it does
 
 - Run as a menu-bar app with no Dock icon.
