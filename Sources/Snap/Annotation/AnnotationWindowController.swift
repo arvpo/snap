@@ -41,6 +41,14 @@ final class AnnotationWindowController {
         canvasView.frame = CGRect(origin: .zero, size: windowFrame.size)
         canvasView.currentTool = document.currentTool
         canvasView.onCommit = { [weak self] value in self?.commit(value) }
+        canvasView.onUpdate = { [weak self] id, value in
+            guard let self, self.document.update(id: id, value: value) else { return }
+            self.publishEdit()
+        }
+        canvasView.onDelete = { [weak self] id in
+            guard let self, self.document.delete(id: id) else { return }
+            self.publishEdit()
+        }
         canvasView.onTextCommit = { [weak self] session in self?.commitText(session) }
         canvasView.onTextStyleChanged = { [weak self] style in self?.toolbar?.setTextStyle(style) }
         canvasView.onUndo = { [weak self] in self?.undo() }
@@ -48,7 +56,7 @@ final class AnnotationWindowController {
         canvasView.onCancel = { [weak self] in self?.finish() }
         canvasView.onToolSelected = { [weak self] tool in self?.selectTool(tool) }
 
-        let toolbarSize = CGSize(width: 250, height: 44)
+        let toolbarSize = CGSize(width: 278, height: 44)
         let toolbar = AnnotationToolbarView(
             frame: CGRect(
                 x: (windowFrame.width - toolbarSize.width) / 2,
@@ -108,12 +116,16 @@ final class AnnotationWindowController {
         document.currentTool = tool
         canvasView?.currentTool = tool
         toolbar?.setSelectedTool(tool)
-        toolbar?.setFrameSize(CGSize(width: 250, height: tool == .text ? 78 : 44))
+        toolbar?.setFrameSize(CGSize(width: 278, height: tool == .text ? 78 : 44))
         window?.makeFirstResponder(canvasView)
     }
 
     private func commit(_ value: AnnotationValue) {
         document.commit(value)
+        publishEdit()
+    }
+
+    private func publishEdit() {
         canvasView?.setAnnotations(document.entries)
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
     }
@@ -131,6 +143,7 @@ final class AnnotationWindowController {
             editor.undoManager?.undo()
             return
         }
+        canvasView?.cancelGesture()
         guard document.undo() else { return }
         canvasView?.setAnnotations(document.entries)
         pipeline.scheduleRender(baseImage: document.baseImage, annotations: document.annotations)
@@ -142,6 +155,7 @@ final class AnnotationWindowController {
     func finish() {
         guard !isFinishing, window != nil else { return }
         isFinishing = true
+        canvasView?.cancelGesture()
         canvasView?.endTextEditing(commit: true)
         // Native Copy/Cut can replace the image with text even if there are no
         // document changes. Always publish a fresh final snapshot on Done.

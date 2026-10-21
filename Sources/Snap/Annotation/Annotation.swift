@@ -2,10 +2,12 @@ import CoreGraphics
 import Foundation
 
 enum AnnotationTool: CaseIterable, Sendable {
+    case select
     case arrow
     case rectangle
     case privacyBlock
     case text
+    case number
 }
 
 struct ArrowAnnotation: Equatable, Sendable {
@@ -126,8 +128,8 @@ enum AnnotationBuilder {
                 return nil
             }
             return .privacyBlock(PrivacyBlockAnnotation(rect: rect))
-        case .text:
-            // Text starts an editing transaction, never a completed shape.
+        case .text, .number, .select:
+            // These tools have dedicated editing/placement interactions.
             return nil
         }
     }

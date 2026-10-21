@@ -7,7 +7,13 @@ import CoreGraphics
 /// alters exported geometry.
 @MainActor
 final class AnnotationCanvasView: NSView, NSTextViewDelegate {
-    var currentTool: AnnotationTool = .arrow
+    var currentTool: AnnotationTool = .arrow {
+        didSet {
+            cancelGesture()
+            if currentTool != .select { selectedAnnotationID = nil }
+            needsDisplay = true
+        }
+    }
     var textStyle = TextStyle()
     var onTextCommit: ((TextEditingSession) -> Void)?
     var onTextStyleChanged: ((TextStyle) -> Void)?
@@ -15,6 +21,16 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private(set) var textEditor: AnnotationTextView?
     private var entries: [Annotation] = []
     var onCommit: ((AnnotationValue) -> Void)?
+    var onUpdate: ((UUID, AnnotationValue) -> Void)?
+    var onDelete: ((UUID) -> Void)?
+    private(set) var selectedAnnotationID: UUID?
+    private struct Manipulation {
+        let entry: Annotation
+        let start: CGPoint
+        let resizing: Bool
+        var preview: AnnotationValue?
+    }
+    private var manipulation: Manipulation?
     var onUndo: (() -> Void)?
     var onFinish: (() -> Void)?
     var onCancel: (() -> Void)?
@@ -52,6 +68,9 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     func setAnnotations(_ entries: [Annotation]) {
         self.entries = entries
+        if let selectedAnnotationID, !entries.contains(where: { $0.id == selectedAnnotationID }) {
+            self.selectedAnnotationID = nil
+        }
         needsDisplay = true
     }
 
@@ -63,6 +82,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         onTextStyleChanged = nil
         entries = []
         onCommit = nil
+        onUpdate = nil
+        onDelete = nil
+        selectedAnnotationID = nil
+        manipulation = nil
         onUndo = nil
         onFinish = nil
         onCancel = nil
@@ -90,8 +113,29 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     override func mouseDown(with event: NSEvent) {
         endTextEditing(commit: true)
+        cancelGesture()
         window?.makeFirstResponder(self)
         let point = imagePoint(from: event)
+        if currentTool == .select {
+            if let selected = entries.first(where: { $0.id == selectedAnnotationID }),
+               let handle = AnnotationSelection.widthHandle(for: selected.value, scale: imageToViewScale, imageSize: imagePixelSize),
+               handle.contains(point), event.clickCount == 1 {
+                manipulation = Manipulation(entry: selected, start: point, resizing: true)
+                return
+            }
+            let hit = AnnotationSelection.hitTest(point, entries: entries, scale: imageToViewScale)
+            let wasSelected = hit?.id == selectedAnnotationID
+            selectedAnnotationID = hit?.id
+            needsDisplay = true
+            if let hit {
+                if wasSelected, event.clickCount >= 2, case .text(let text) = hit.value {
+                    beginTextEditing(TextEditingSession(annotationID: hit.id, draft: text))
+                } else {
+                    manipulation = Manipulation(entry: hit, start: point, resizing: false)
+                }
+            }
+            return
+        }
         if currentTool == .text, let entry = entries.reversed().first(where: {
             if case .text = $0.value { return AnnotationLayout.bounds(of: $0.value).contains(point) }
             return false
@@ -104,6 +148,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if manipulation != nil {
+            updateManipulation(to: imagePoint(from: event))
+            return
+        }
         guard let dragStart else { return }
         let current = imagePoint(from: event)
         if currentTool == .text {
@@ -121,6 +169,16 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if manipulation != nil {
+            updateManipulation(to: imagePoint(from: event))
+            let completed = manipulation
+            manipulation = nil
+            needsDisplay = true
+            if let completed, let preview = completed.preview, preview != completed.entry.value {
+                onUpdate?(completed.entry.id, preview)
+            }
+            return
+        }
         guard let dragStart else { return }
         let current = imagePoint(from: event)
         self.dragStart = nil
@@ -132,6 +190,13 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             var style = textStyle
             style.fontSize /= max(imageToViewScale, 0.001)
             beginTextEditing(.new(from: dragStart, to: current, style: style))
+        } else if currentTool == .number {
+            let next = entries.reduce(1) { count, entry in
+                if case .number = entry.value { return count + 1 }
+                return count
+            }
+            onCommit?(.number(AnnotationSelection.marker(at: current, number: next,
+                scale: imageToViewScale, imageSize: imagePixelSize)))
         } else if let value = AnnotationBuilder.makeAnnotation(for: currentTool, from: dragStart, to: current) {
             onCommit?(value)
         }
@@ -144,6 +209,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         if event.modifierFlags.contains(.command) {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "z":
+                cancelGesture()
                 onUndo?()
                 return
             case "c":
@@ -152,13 +218,29 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
                 onFinish?()
                 return
             default:
-                break
+                super.keyDown(with: event)
+                return
             }
         }
 
         switch event.keyCode {
         case 53: // Esc
+            if manipulation != nil || dragStart != nil {
+                cancelGesture()
+                return
+            }
+            if selectedAnnotationID != nil {
+                selectedAnnotationID = nil
+                needsDisplay = true
+                return
+            }
             onCancel?()
+            return
+        case 51, 117: // Delete, forward Delete
+            if currentTool == .select, let selectedAnnotationID {
+                cancelGesture()
+                onDelete?(selectedAnnotationID)
+            }
             return
         case 36, 76: // Return, keypad Enter
             onFinish?()
@@ -168,6 +250,12 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
 
         switch event.charactersIgnoringModifiers?.lowercased() {
+        case "v":
+            currentTool = .select
+            onToolSelected?(.select)
+        case "n":
+            currentTool = .number
+            onToolSelected?(.number)
         case "a":
             currentTool = .arrow
             onToolSelected?(.arrow)
@@ -187,6 +275,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     func beginTextEditing(_ session: TextEditingSession) {
         endTextEditing(commit: true)
+        cancelGesture()
         textSession = session
         textStyle = session.draft.style
         textStyle.fontSize *= imageToViewScale
@@ -220,6 +309,30 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         updateTextEditorAppearance()
         window?.makeFirstResponder(editor)
         editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+        needsDisplay = true
+    }
+
+    func cancelGesture() {
+        manipulation = nil
+        dragStart = nil
+        textDragRect = nil
+        previewAnnotation = nil
+        needsDisplay = true
+    }
+
+    private func updateManipulation(to point: CGPoint) {
+        guard var gesture = manipulation else { return }
+        let offset = CGSize(width: point.x - gesture.start.x, height: point.y - gesture.start.y)
+        // A click must not accidentally move a value or wrap natural-width text.
+        let distance = gesture.resizing ? abs(offset.width) : hypot(offset.width, offset.height)
+        if gesture.preview == nil, distance * imageToViewScale < 3 { return }
+        if gesture.resizing, case .text(let text) = gesture.entry.value {
+            gesture.preview = .text(AnnotationSelection.resized(text, by: offset.width,
+                scale: imageToViewScale, imageSize: imagePixelSize))
+        } else {
+            gesture.preview = AnnotationSelection.moved(gesture.entry.value, by: offset, imageSize: imagePixelSize)
+        }
+        manipulation = gesture
         needsDisplay = true
     }
 
@@ -313,7 +426,8 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         context.saveGState()
         context.scaleBy(x: scale, y: scale)
         for entry in entries where entry.id != textSession?.annotationID {
-            ImageRenderer.draw(entry.value, in: context)
+            let value = entry.id == manipulation?.entry.id ? manipulation?.preview ?? entry.value : entry.value
+            ImageRenderer.draw(value, in: context)
         }
         // The native editor draws the glyphs; use the shared layout for its
         // callout background so padding and export geometry stay identical.
@@ -336,6 +450,23 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
         if let previewAnnotation {
             ImageRenderer.draw(previewAnnotation, in: context)
+        }
+        if currentTool == .select, textSession == nil,
+           let entry = entries.first(where: { $0.id == selectedAnnotationID }) {
+            let value = manipulation?.preview ?? entry.value
+            if let rect = AnnotationSelection.bounds(of: value) {
+                context.setShouldAntialias(true)
+                context.setStrokeColor(NSColor.systemBlue.cgColor)
+                context.setLineWidth(1 / scale)
+                context.setLineDash(phase: 0, lengths: [4 / scale, 3 / scale])
+                context.stroke(rect.insetBy(dx: -2 / scale, dy: -2 / scale))
+                if let handle = AnnotationSelection.widthHandle(for: value, scale: scale, imageSize: imagePixelSize) {
+                    context.setLineDash(phase: 0, lengths: [])
+                    context.setFillColor(NSColor.white.cgColor)
+                    context.fill(handle)
+                    context.stroke(handle)
+                }
+            }
         }
         context.restoreGState()
     }

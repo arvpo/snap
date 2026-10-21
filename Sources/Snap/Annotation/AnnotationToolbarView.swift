@@ -26,6 +26,9 @@ final class AnnotationToolbarView: NSView {
         layer?.borderWidth = 1
         layer?.borderColor = NSColor(white: 1, alpha: 0.12).cgColor
 
+        let selectButton = addButton(symbol: "cursorarrow", tooltip: "Select  (V)") { [weak self] in
+            self?.onToolSelected?(.select)
+        }
         let arrowButton = addButton(symbol: "arrow.up.right", tooltip: "Arrow  (A)") { [weak self] in
             self?.onToolSelected?(.arrow)
         }
@@ -38,7 +41,11 @@ final class AnnotationToolbarView: NSView {
         let textButton = addButton(symbol: "textformat", tooltip: "Text  (T)") { [weak self] in
             self?.onToolSelected?(.text)
         }
-        toolButtons = [.text: textButton, .arrow: arrowButton, .rectangle: rectangleButton, .privacyBlock: privacyButton]
+        let numberButton = addButton(symbol: "1.circle", tooltip: "Number  (N)") { [weak self] in
+            self?.onToolSelected?(.number)
+        }
+        toolButtons = [.select: selectButton, .text: textButton, .number: numberButton,
+                       .arrow: arrowButton, .rectangle: rectangleButton, .privacyBlock: privacyButton]
 
         addSeparator()
 

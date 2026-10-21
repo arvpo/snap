@@ -89,14 +89,14 @@ func registerAnnotationTextEditingTests() {
         let editor = canvas.textEditor!
         canvas.keyDown(with: key(11, "b", flags: .command))
         canvas.keyDown(with: key(36, "\r"))
-        for (code, letter) in [(UInt16(0), "a"), (15, "r"), (11, "b"), (17, "t")] {
+        for (code, letter) in [(UInt16(0), "a"), (15, "r"), (11, "b"), (17, "t"), (45, "n"), (9, "v")] {
             editor.keyDown(with: key(code, letter))
         }
         editor.keyDown(with: key(36, "\r", flags: .shift))
         editor.insertText("世界 👩🏽‍💻", replacementRange: NSRange(location: NSNotFound, length: 0))
         editor.keyDown(with: key(36, "\r"))
         try expectEqual(commits.count, 1)
-        try expectEqual(commits[0].draft.text, "arbt\n世界 👩🏽‍💻")
+        try expectEqual(commits[0].draft.text, "arbtnv\n世界 👩🏽‍💻")
         try expectEqual(finished, 0)
         try expectEqual(tools, 0)
         try expect(canvas.textEditor == nil)

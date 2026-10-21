@@ -6,11 +6,11 @@ It exists because Flameshot can sit at 300 MB and climb toward 3 GB. Snap captur
 
 ## Status
 
-Phases 1 through 5 are implemented. Snap is a menu-bar app: global hotkey, pointer-display capture, region select, eager PNG clipboard, and a four-tool annotation editor. Automated tests cover mixed-display conversion, crop pixels, annotation geometry, undo, render-generation, coordinator transitions, presenter cancel/failure teardown, and 50-cycle session lifetime counters.
+Phases 1 through 5 of the original plan are implemented. Snap is a menu-bar app: global hotkey, pointer-display capture, region select, eager PNG clipboard, and an annotation editor. Automated tests cover mixed-display conversion, crop pixels, annotation geometry, undo, render-generation, coordinator transitions, presenter cancel/failure teardown, and 50-cycle session lifetime counters.
 
 Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App Store release are a later phase.
 
-The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). The suite now has 104 passing tests. Numbered-marker placement remains in phase 3.
+The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). Phase 3 adds repeated numbered-marker placement and selection, movement, deletion, and text-box width adjustment. All 119 tests pass.
 
 ## What it does
 
@@ -18,8 +18,10 @@ The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately.
 - Start from `Cmd+Shift+X` or the menu-bar Capture item.
 - Freeze only the display containing the mouse, then let you drag a region.
 - Copy that crop to the clipboard immediately.
-- Annotate with a red arrow, a red outline rectangle, an opaque black privacy block, or text/callouts.
+- Annotate with a red arrow, a red outline rectangle, an opaque black privacy block, text/callouts, or numbered markers.
 - With Text selected, click to type or drag to set the wrapping width. Click existing text to edit it. The toolbar offers plain/callout, red/blue/green/yellow/black/white, and 14/18/24-point sizes. Defaults reset each capture.
+- With Number selected, click repeatedly to place markers starting at 1. Circles start at 28 display points and grow for longer labels. Moving markers preserves their order; deletion closes gaps.
+- With Select selected, click text or a marker to select it, drag to move, and press Delete to remove it. Drag the right-side text handle to change wrapping width; double-click selected text to edit. Each completed gesture is one undo step. Selection outlines and handles never appear in clipboard images.
 - Recopy the clipboard after every completed annotation.
 - Close with `Enter`. Cancel selection with `Esc`. Undo with `Cmd+Z`.
 
@@ -85,6 +87,8 @@ make package
 open dist/Snap.app
 ```
 
+If `swift test` exits without the final test-count summary on current Command Line Tools, run `./scripts/test-appkit.sh`. It builds and runs the same full test catalog in a standalone AppKit event loop; phase 3 validation used this runner. Native UI tests need pasteboard and font-service access.
+
 `make package` runs `scripts/build-app.sh`. That assembles `dist/Snap.app`, copies `Resources/Info.plist`, and ad-hoc signs the bundle. macOS Screen Recording permission is tied to that bundle identifier, so do not run the raw SwiftPM binary as the daily target.
 
 Do not use `xcodebuild` for this project.
@@ -98,16 +102,20 @@ Do not use `xcodebuild` for this project.
 | `R` | Outline rectangle |
 | `B` | Privacy block |
 | `T` | Text (click to type; drag for wrapping width) |
+| `N` | Number (click repeatedly to place consecutive markers) |
+| `V` | Select text or markers; drag to move; use the text handle to resize width |
 | `Cmd+Z` | Undo text while editing; otherwise undo a completed annotation edit |
 | `Cmd+C` | Copy selected text while editing; otherwise publish the image and close |
-| `Delete` | Not implemented; selecting an existing annotation is out of scope for the MVP editor |
+| `Delete` / forward Delete | Remove selected text or marker; remaining markers renumber automatically |
 | `Enter` | Commit active text; otherwise finish and publish the image |
 | `Shift+Enter` | Add a newline while editing text |
-| `Esc` | Cancel a text edit (or dismiss an active input-method composition); otherwise cancel selection or close the editor |
+| `Esc` | Cancel active text/gesture, then clear annotation selection; otherwise cancel capture selection or close the editor |
 
 Done commits active text and republishes the final image, including after text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
 
 Toolbar layout and small-crop chrome will be refined in upgrade phase 4. Live input-method candidate windows and mixed-display text sizing still need manual validation.
+
+Marker circles and moved text boxes stay within the crop when they fit. Oversized text can be moved across its visible extent, and markers larger than a tiny crop are centered and clipped. Text wrapping is limited to the available width; very tall text and marker shadows can clip at image edges. Geometry tests cover 1×, Retina (0.5×), and scaled-to-fit (0.25×) canvas transforms; real mixed-display validation remains pending.
 
 ## Measurements
 
