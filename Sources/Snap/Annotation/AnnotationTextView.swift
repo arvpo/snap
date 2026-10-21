@@ -6,7 +6,10 @@ import AppKit
 final class AnnotationTextView: NSTextView {
     var onCommit: (() -> Void)?
     var onCancel: (() -> Void)?
-    private let textUndoManager = UndoManager()
+    // NSTextView's chained Objective-C initializers can initialize Swift stored
+    // properties more than once. Allocate after initialization so an overwritten
+    // eager undo manager cannot leak before our getter ever exposes it.
+    private lazy var textUndoManager = TextUndoManager()
 
     override var undoManager: UndoManager? { textUndoManager }
 
@@ -53,5 +56,16 @@ final class AnnotationTextView: NSTextView {
         onCancel = nil
         undoManager?.removeAllActions()
         textStorage?.setAttributedString(NSAttributedString(string: ""))
+    }
+}
+
+private final class TextUndoManager: UndoManager {
+    override init() {
+        super.init()
+        SessionLifetime.retain(.textUndoManager)
+    }
+
+    deinit {
+        SessionLifetime.release(.textUndoManager)
     }
 }

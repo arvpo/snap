@@ -73,6 +73,22 @@ private func runAllTests() async -> Int32 {
     registerImageRendererTests()
     registerAnnotationRenderPipelineTests()
     registerAnnotationResponsivenessTests()
+    registerAnnotationWorkflowTests()
+    registerAnnotationPerformanceTests()
+
+    // An opt-in live run must fail clearly when TCC access is unavailable;
+    // never count synthetic captures as a passing real-capture check.
+    if ProcessInfo.processInfo.environment["SNAP_LIVE_CAPTURE_CHECK"] == "1" {
+        registerLiveAnnotationWorkflowTests()
+    }
+
+    if let filter = ProcessInfo.processInfo.environment["SNAP_TEST_FILTER"] {
+        TestCatalog.tests = TestCatalog.tests.filter { $0.name.localizedCaseInsensitiveContains(filter) }
+        guard !TestCatalog.tests.isEmpty else {
+            print("No tests match SNAP_TEST_FILTER=\(filter)")
+            return EXIT_FAILURE
+        }
+    }
 
     var failed = 0
     for item in TestCatalog.tests {
@@ -92,7 +108,18 @@ private func runAllTests() async -> Int32 {
 
 /// Entry point invoked by the SwiftPM-generated test runner.
 public func __swiftPMEntryPoint() async -> Never {
-    exit(await runAllTests())
+    let status = await runAllTests()
+    // leaks --atExit reports its own findings, not the child exit status.
+    // Preserve functional failures (and detect crashes with a missing marker).
+    if let resultPath = ProcessInfo.processInfo.environment["SNAP_TEST_RESULT_PATH"] {
+        do {
+            try String(status).write(toFile: resultPath, atomically: true, encoding: .utf8)
+        } catch {
+            print("Could not record test exit status: \(error)")
+            exit(EXIT_FAILURE)
+        }
+    }
+    exit(status)
 }
 
 func makeTestCGImage(width: Int = 8, height: Int = 8) -> CGImage {

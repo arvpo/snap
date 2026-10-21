@@ -33,6 +33,24 @@ private final class TextClipboard: ClipboardServicing {
 
 @MainActor
 func registerAnnotationTextEditingTests() {
+    test("native text initialization owns exactly one private undo manager and releases it") {
+        try await waitUntil(timeout: .seconds(2)) { SessionLifetime.count(of: .textUndoManager) == 0 }
+        let baseline = SessionLifetime.count(of: .textUndoManager)
+        weak var manager: UndoManager?
+        weak var view: AnnotationTextView?
+        try autoreleasepool {
+            let editor = AnnotationTextView(frame: .zero)
+            view = editor
+            manager = editor.undoManager
+            try expect(manager != nil)
+            try expectEqual(SessionLifetime.count(of: .textUndoManager), baseline + 1)
+            editor.releaseResources()
+        }
+        await pumpMainLoop()
+        try await waitUntil(timeout: .seconds(2)) { view == nil && manager == nil }
+        try expectEqual(SessionLifetime.count(of: .textUndoManager), baseline)
+    }
+
     test("text drafts discard empty insertions and group an entire edit into one undo") {
         let document = AnnotationDocument(baseImage: makeTestCGImage())
         var session = TextEditingSession.new(from: .zero, to: .zero, style: TextStyle())

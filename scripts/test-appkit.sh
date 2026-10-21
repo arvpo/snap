@@ -35,4 +35,17 @@ swiftc -parse-as-library -swift-version 6 -module-name SnapAppKitTests \
     -module-cache-path "$CLANG_MODULE_CACHE_PATH" -I "$products/Modules" \
     "${test_sources[@]}" "$build_dir/Runner.swift" "$products"/SnapCore.build/*.o \
     -o "$build_dir/RunTests"
-"$build_dir/RunTests"
+# Optional diagnostic run. Keep leak-tool exit status and complete allocation
+# stacks; a nonzero result must be investigated, never converted into a pass.
+if [[ "${SNAP_TEST_LEAKS:-0}" == "1" ]]; then
+    leak_status=0
+    SNAP_TEST_RESULT_PATH="$build_dir/test-result" MallocStackLogging=1 \
+        leaks --atExit -- "$build_dir/RunTests" || leak_status=$?
+    if [[ ! -f "$build_dir/test-result" ]] || [[ "$(cat "$build_dir/test-result")" != "0" ]]; then
+        echo "error: test catalog failed or did not complete under leaks" >&2
+        exit 1
+    fi
+    exit "$leak_status"
+else
+    "$build_dir/RunTests"
+fi

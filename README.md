@@ -12,7 +12,7 @@ Local packaging stays ad-hoc signed. Developer ID, notarization, DMG, and App St
 
 The [annotation upgrade plan](ANNOTATION_UPGRADE_PLAN.md) is tracked separately. Its first phase adds stable annotation identities, grouped undo for edits and marker renumbering, and shared Core Text rendering and bounds for text, callouts, and numbered markers. Phase 2 adds native text entry, plain text and filled callouts, six colors, and 14/18/24-point sizes (18 by default). Phase 3 adds repeated numbered-marker placement and selection, movement, deletion, and text-box width adjustment. Phase 4 moves the compact toolbar into editor chrome and adds contextual styling, keyboard focus, and accessibility. Phase 5 moves PNG encoding off the main actor, bounds background image work, redraws changed canvas regions, and provides retryable clipboard errors.
 
-The upgrade suite currently passes all **139 tests** through `scripts/test-appkit.sh`; debug and release builds pass. Real capture/display/memory validation remains in upgrade phase 6.
+The upgrade suite currently passes all **148 tests** through `scripts/test-appkit.sh`; debug/release builds and signed app packaging pass. Phase 6 adds complete scaled editing workflows, 50 synthetic capture/edit/close cycles, and 100-annotation performance probes. See the [phase 6 validation report](PHASE6_VALIDATION.md) for measurements, reproduction commands, and the live checks still blocking release acceptance.
 
 ## What it does
 
@@ -27,7 +27,7 @@ The upgrade suite currently passes all **139 tests** through `scripts/test-appki
 - Keep the compact toolbar above the image, with surrounding space for tiny crops. Arrow is selected initially. Text style is available while Text is selected or an existing text annotation is being edited. Tab/Shift+Tab navigates the toolbar; Undo reflects the active text or document history. Editor chrome never appears in exports.
 - Recopy the clipboard after completed edits. Rapid edits replace one pending snapshot while a single render/encode worker finishes; only the newest valid result is published. Typing and drag previews never encode PNGs.
 - Retry a failed clipboard update, or choose Close to cancel the session. Done waits for successful publication; Escape invalidates pending output and keeps whatever is already on the clipboard.
-- Close with `Enter`. Cancel selection with `Esc`. Undo with `Cmd+Z`.
+- `Enter` commits active text; outside text editing it finishes. Cancel selection with `Esc`. Undo with `Cmd+Z`.
 
 No file saving, history, upload, OCR, or preferences in the first version.
 
@@ -65,7 +65,7 @@ These are not optional.
 
 A 5K display buffer is about 59 MB. That spike is allowed only while the overlay is up. It must be gone after selection or cancel.
 
-On this machine the built-in display is 2560×1664 Retina. One 4-byte buffer is 16.3 MB, so the selection budget is 51.3 MB.
+The 2026-10-21 display inventory reports the built-in display at 1470×956 points with 2× backing (2940×1912 pixels), plus a 2560×1440 1× external display at a negative X origin. The built-in 4-byte pixel buffer is about 21.4 MiB; the external display is captured only when it contains the pointer. Live validation of this arrangement remains open.
 
 ## Latency targets
 
@@ -111,9 +111,10 @@ Do not use `xcodebuild` for this project.
 | `Cmd+Z` | Undo text while editing; otherwise undo a completed annotation edit |
 | `Cmd+C` | Copy selected text while editing; otherwise publish the image and close |
 | `Delete` / forward Delete | Remove selected text or marker; remaining markers renumber automatically |
-| `Enter` | Commit active text; otherwise finish and publish the image |
+| `Enter` / keypad Enter | Commit active text; otherwise finish and publish the image |
 | `Shift+Enter` | Add a newline while editing text |
 | `Esc` | Cancel active text/gesture, then clear annotation selection; otherwise cancel capture selection or close the editor |
+| `Tab` / `Shift+Tab` | Move through toolbar controls outside native text editing |
 
 Done commits active text and republishes the final image, including after text Copy/Cut. If publication fails, Retry completes Done after a successful write; Close cancels. Escape closes without waiting for a pending image write or restoring a clipboard image replaced by native text Copy/Cut. Empty new text is discarded; emptying and committing existing text deletes it. A whole text-editing session is one annotation undo step. Native text selection, plain-text paste, and text undo remain available during editing.
 
@@ -122,6 +123,8 @@ The toolbar and small-crop chrome are implemented. Live input-method candidate w
 Marker circles and moved text boxes stay within the crop when they fit. Oversized text can be moved across its visible extent, and markers larger than a tiny crop are centered and clipped. Text wrapping is limited to the available width; very tall text and marker shadows can clip at image edges. Geometry tests cover 1×, Retina (0.5×), and scaled-to-fit (0.25×) canvas transforms; real mixed-display validation remains pending.
 
 ## Measurements
+
+Upgrade phase 6 (2026-10-22): the final 148-test run measured **7.61 ms p95** for 800×600 with 100 mixed annotations, including real pasteboard publication, and **88.48 ms p95** at 3840×2160. CPU drag-handler plus full offscreen draw p95 was 2.93 / 5.79 ms respectively; this does not measure physical input-to-display latency. Fifty synthetic sessions left no tracked session objects or weak image/editor/undo-manager references, but warmed test-process RSS grew **11.38 MB**, missing the 10 MB target. A private text undo-manager initialization leak was fixed; the subsequent leak diagnostic reported only macOS AppIntents/XPC stacks. Release build, packaging, signature, and plist checks pass. RSS investigation and live checks remain release gates. See [methodology, variation, and unresolved targets](PHASE6_VALIDATION.md).
 
 Upgrade phase 5 measurements (2026-10-21, debug AppKit runner, synthetic 800×600 base and three shapes):
 
@@ -132,7 +135,7 @@ Upgrade phase 5 measurements (2026-10-21, debug AppKit runner, synthetic 800×60
 | Full background pipeline + real pasteboard publication, 30 warmed samples | not recorded | 2.73 ms p95 |
 | Background render / encode / main-actor publication, separate stage p95s | not recorded | 0.28 / 2.35 / 0.09 ms |
 
-The pipeline probe uses two warmup iterations before the 30 samples. These warmed measurements are not directly comparable to the one-shot probes and do not prove a real-capture latency target. Real screenshots, large images with 100 mixed annotations, frame-time measurements, and live memory/leak checks remain for phase 6. Automated tests do verify background execution, one-worker concurrency, stale-result rejection, and release of output pixels and PNGs after success or cancellation.
+The phase 5 pipeline probe uses two warmup iterations before the 30 samples. These warmed measurements are not directly comparable to the one-shot probes and do not prove a real-capture latency target. Phase 6 measures large synthetic images with 100 mixed annotations; real screenshot timings, physical frame-time measurements, and live memory/leak checks remain open. Automated tests verify background execution, one-worker concurrency, stale-result rejection, and release of output pixels and PNGs after success or cancellation.
 
 Recorded 2026-08-23 on an Apple M4, built-in 2560×1664 Retina display, no external monitors. Interactive capture, selection-spike, and post-editor RSS were not taken in this session.
 
@@ -168,6 +171,8 @@ Treat any definitely lost allocation rooted in Snap code, any surviving session 
 ## Manual matrix still needed
 
 These still need a human on this machine:
+
+Computer Use was not approved to control Snap, and the opt-in real-capture test runner lacked Screen Recording access. Neither unavailable check is recorded as passing. The [phase 6 report](PHASE6_VALIDATION.md) distinguishes synthetic evidence from each live release gate.
 
 - Single display, and pointer-based capture on every monitor
 - Retina and mixed scale

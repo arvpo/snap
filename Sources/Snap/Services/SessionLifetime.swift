@@ -13,6 +13,7 @@ enum SessionLifetime: Sendable {
         case document
         case overlayView
         case canvasView
+        case textUndoManager
         case renderTask
     }
 
